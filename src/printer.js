@@ -84,7 +84,7 @@ export const printCanvas = async (characteristic, canvas) => {
 	const data = getPrintData(canvas);
 
 	await characteristic.writeValueWithResponse(
-		HEADER_DATA(canvas.width / 8, data.length / (canvas.width / 8))
+		HEADER_DATA(canvas.width / 8, data.length / (canvas.width / 8)),
 	);
 
 	for (let i = 0; ; i += PACKET_SIZE_BYTES) {

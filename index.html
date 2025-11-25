@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+<!doctype html>
 <html>
 	<head>
 		<title>Phomemo D30 Web Bluetooth</title>
@@ -68,6 +68,18 @@
 					>
 						QR Code
 					</button>
+					<button
+						class="nav-link"
+						id="nav-filament-tab"
+						data-bs-toggle="tab"
+						data-bs-target="#nav-filament"
+						type="button"
+						role="tab"
+						aria-controls="nav-filament"
+						aria-selected="false"
+					>
+						Filament Label
+					</button>
 				</div>
 			</nav>
 			<form class="col-lg-6">
@@ -129,6 +141,137 @@
 						<h2>QR Code</h2>
 						<label for="inputQR" class="form-label">QR code data</label>
 						<input type="text" class="form-control" value="https://example.com" id="inputQR" />
+					</div>
+					<div
+						class="tab-pane"
+						id="nav-filament"
+						role="tabpanel"
+						aria-labelledby="nav-filament-tab"
+						tabindex="0"
+					>
+						<h2>Filament Label</h2>
+						<p class="text-muted small">Create labels for your 3D printer filament spools.</p>
+
+						<div class="alert alert-info small" role="alert">
+							<strong>Tip:</strong> Drag the bookmarklet below to your bookmarks bar, then click it
+							on
+							<a href="https://3dfilamentprofiles.com" target="_blank" rel="noopener"
+								>3dfilamentprofiles.com</a
+							>
+							to auto-fill the form!<br />
+							<a
+								href="javascript:(function(){var d=document,b=d.querySelector('[itemprop=brand]'),m=d.querySelector('[itemprop=material]'),c=d.querySelector('[itemprop=color]'),nt=d.querySelector('[data-nozzle-temp]'),bt=d.querySelector('[data-bed-temp]'),n=d.querySelector('[itemprop=name]');var data={brand:b?b.textContent.trim():'',material:m?m.textContent.trim():'',color:c?c.textContent.trim():'',name:n?n.textContent.trim():'',nozzleTemp:nt?nt.textContent.trim():'',bedTemp:bt?bt.textContent.trim():''};if(!data.brand){var t=d.title||'';var parts=t.split(/[-|]/);if(parts.length>=2){data.brand=parts[0].trim();data.name=parts[1]?parts[1].trim():''}}var tables=d.querySelectorAll('table');tables.forEach(function(table){var rows=table.querySelectorAll('tr');rows.forEach(function(row){var cells=row.querySelectorAll('td,th');if(cells.length>=2){var label=cells[0].textContent.toLowerCase();var value=cells[1].textContent.trim();if(label.includes('brand')&&!data.brand)data.brand=value;if(label.includes('material')&&!data.material)data.material=value;if(label.includes('color')&&!data.color)data.color=value;if((label.includes('nozzle')||label.includes('extruder'))&&!data.nozzleTemp)data.nozzleTemp=value;if(label.includes('bed')&&!data.bedTemp)data.bedTemp=value}})});var u='https://odensc.github.io/phomemo-d30-web-bluetooth/?filament='+encodeURIComponent(JSON.stringify(data));window.open(u,'_blank')})();"
+								class="btn btn-sm btn-outline-primary mt-2"
+								onclick="event.preventDefault();alert('Drag this button to your bookmarks bar!')"
+								>📋 Print Filament Label</a
+							>
+						</div>
+
+						<div class="row g-2 mb-2">
+							<div class="col-6">
+								<label for="inputFilamentBrand" class="form-label">Brand</label>
+								<input
+									type="text"
+									class="form-control"
+									id="inputFilamentBrand"
+									placeholder="e.g., Hatchbox"
+								/>
+							</div>
+							<div class="col-6">
+								<label for="inputFilamentMaterial" class="form-label">Material</label>
+								<input
+									type="text"
+									class="form-control"
+									id="inputFilamentMaterial"
+									placeholder="e.g., PLA"
+								/>
+							</div>
+						</div>
+
+						<div class="row g-2 mb-2">
+							<div class="col-6">
+								<label for="inputFilamentColor" class="form-label">Color</label>
+								<input
+									type="text"
+									class="form-control"
+									id="inputFilamentColor"
+									placeholder="e.g., Black"
+								/>
+							</div>
+							<div class="col-6">
+								<label for="inputFilamentName" class="form-label">Name (optional)</label>
+								<input
+									type="text"
+									class="form-control"
+									id="inputFilamentName"
+									placeholder="e.g., Matte Black"
+								/>
+							</div>
+						</div>
+
+						<div class="row g-2 mb-2">
+							<div class="col-6">
+								<label for="inputFilamentNozzle" class="form-label">Nozzle Temp (°C)</label>
+								<input
+									type="text"
+									class="form-control"
+									id="inputFilamentNozzle"
+									placeholder="e.g., 200-220"
+								/>
+							</div>
+							<div class="col-6">
+								<label for="inputFilamentBed" class="form-label">Bed Temp (°C)</label>
+								<input
+									type="text"
+									class="form-control"
+									id="inputFilamentBed"
+									placeholder="e.g., 60"
+								/>
+							</div>
+						</div>
+
+						<div class="mb-2">
+							<label for="inputFilamentNotes" class="form-label">Notes (optional)</label>
+							<input
+								type="text"
+								class="form-control"
+								id="inputFilamentNotes"
+								placeholder="e.g., Good for minis"
+							/>
+						</div>
+
+						<div class="mb-2">
+							<label class="form-label">Label Template</label>
+							<div class="btn-group w-100" role="group" aria-label="Label template selection">
+								<input
+									type="radio"
+									class="btn-check"
+									name="labelTemplate"
+									id="templateCompact"
+									value="compact"
+									checked
+								/>
+								<label class="btn btn-outline-secondary" for="templateCompact">Compact</label>
+
+								<input
+									type="radio"
+									class="btn-check"
+									name="labelTemplate"
+									id="templateDetailed"
+									value="detailed"
+								/>
+								<label class="btn btn-outline-secondary" for="templateDetailed">Detailed</label>
+
+								<input
+									type="radio"
+									class="btn-check"
+									name="labelTemplate"
+									id="templateMinimal"
+									value="minimal"
+								/>
+								<label class="btn btn-outline-secondary" for="templateMinimal">Minimal</label>
+							</div>
+						</div>
 					</div>
 				</div>
 
@@ -207,7 +350,12 @@
 			referrerpolicy="no-referrer"
 			defer
 		></script>
-		<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcode/1.5.1/qrcode.min.js" integrity="sha512-PEhlWBZBrQL7flpJPY8lXx8tIN7HWX912GzGhFTDqA3iWFrakVH3lVHomCoU9BhfKzgxfEk6EG2C3xej+9srOQ==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+		<script
+			src="https://cdnjs.cloudflare.com/ajax/libs/qrcode/1.5.1/qrcode.min.js"
+			integrity="sha512-PEhlWBZBrQL7flpJPY8lXx8tIN7HWX912GzGhFTDqA3iWFrakVH3lVHomCoU9BhfKzgxfEk6EG2C3xej+9srOQ=="
+			crossorigin="anonymous"
+			referrerpolicy="no-referrer"
+		></script>
 		<script type="module" src="index.js" defer></script>
 	</body>
 </html>
