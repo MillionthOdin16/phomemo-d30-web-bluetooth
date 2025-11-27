@@ -1,11 +1,20 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 	<head>
-		<title>Phomemo D30 Web Bluetooth</title>
+		<title>Phomemo D30 Web Bluetooth - Advanced Label Printer</title>
 
 		<meta charset="utf-8" />
 		<meta name="viewport" content="width=device-width, initial-scale=1" />
-
+		<meta name="description" content="A comprehensive web interface for Phomemo Bluetooth label printers with voice control, camera scanning, and AI-powered features." />
+		<meta name="theme-color" content="#0d6efd" />
+		<meta name="mobile-web-app-capable" content="yes" />
+		<meta name="apple-mobile-web-app-capable" content="yes" />
+		<meta name="apple-mobile-web-app-status-bar-style" content="default" />
+		<meta name="apple-mobile-web-app-title" content="Phomemo Print" />
+		
+		<!-- PWA Manifest -->
+		<link rel="manifest" href="manifest.json" />
+		
 		<link
 			rel="stylesheet"
 			href="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.3/css/bootstrap.min.css"
@@ -13,164 +22,1157 @@
 			crossorigin="anonymous"
 			referrerpolicy="no-referrer"
 		/>
+		<link
+			rel="stylesheet"
+			href="https://cdnjs.cloudflare.com/ajax/libs/bootstrap-icons/1.11.3/font/bootstrap-icons.min.css"
+			integrity="sha512-dPXYcDub/aeb08c63jRq/k6GqJ/RIVV6A5y1Erf5ZU8A1cPhh0B8pFvD/UHlnH41RN7UQE3Hn0Y+hJGHCQkS1g=="
+			crossorigin="anonymous"
+			referrerpolicy="no-referrer"
+		/>
 		<link rel="stylesheet" href="index.css" />
 	</head>
 	<body>
 		<div class="container my-4">
-			<h1>Phomemo D30 Web Bluetooth</h1>
-			<nav class="mb-3">
-				<div class="nav nav-tabs" id="nav-tab" role="tablist">
-					<button
-						class="nav-link active"
-						id="nav-text-tab"
-						data-bs-toggle="tab"
-						data-bs-target="#nav-text"
-						type="button"
-						role="tab"
-						aria-controls="nav-text"
-						aria-selected="true"
-					>
-						Text
+			<div class="d-flex justify-content-between align-items-center mb-3">
+				<h1><i class="bi bi-printer"></i> Phomemo Web Bluetooth</h1>
+				<div class="d-flex align-items-center gap-2">
+					<!-- Voice Control Button -->
+					<button type="button" class="btn btn-outline-danger btn-sm" id="btnVoice" title="Voice Control (Beta)">
+						<i class="bi bi-mic"></i>
 					</button>
-					<button
-						class="nav-link"
-						id="nav-barcode-tab"
-						data-bs-toggle="tab"
-						data-bs-target="#nav-barcode"
-						type="button"
-						role="tab"
-						aria-controls="nav-barcode"
-						aria-selected="false"
-					>
-						Barcode
+					<!-- Install PWA Button -->
+					<button type="button" class="btn btn-outline-success btn-sm" id="btnInstall" style="display: none" title="Install App">
+						<i class="bi bi-download"></i>
 					</button>
-					<button
-						class="nav-link"
-						id="nav-image-tab"
-						data-bs-toggle="tab"
-						data-bs-target="#nav-image"
-						type="button"
-						role="tab"
-						aria-controls="nav-image"
-						aria-selected="false"
-					>
-						Image
-					</button>
-					<button
-						class="nav-link"
-						id="nav-qr-tab"
-						data-bs-toggle="tab"
-						data-bs-target="#nav-qr"
-						type="button"
-						role="tab"
-						aria-controls="nav-qr"
-						aria-selected="false"
-					>
-						QR Code
+					<span id="connectionStatus" class="badge bg-secondary">
+						<i class="bi bi-bluetooth"></i> Not Connected
+					</span>
+					<button type="button" class="btn btn-outline-primary btn-sm" id="btnConnect">
+						<i class="bi bi-bluetooth"></i> Connect Printer
 					</button>
 				</div>
-			</nav>
-			<form class="col-lg-6">
-				<div class="tab-content mb-3" id="nav-tabContent">
-					<div
-						class="tab-pane show active"
-						id="nav-text"
-						role="tabpanel"
-						aria-labelledby="nav-text-tab"
-						tabindex="0"
-					>
-						<h2>Text</h2>
-						<label for="inputFontSize" class="form-label">Font size</label>
-						<div class="input-group mb-2">
-							<input
-								type="number"
-								step="1"
-								min="1"
-								value="48"
-								size="10"
-								class="form-control flex-grow-0"
-								style="width: 4rem"
-								id="inputFontSize"
-							/>
-							<span class="input-group-text">px</span>
+			</div>
+			
+			<!-- Smart Clipboard Suggestion Banner -->
+			<div class="alert alert-info alert-dismissible fade" id="clipboardSuggestion" role="alert" style="display: none">
+				<div class="d-flex align-items-center justify-content-between">
+					<div>
+						<i class="bi bi-clipboard-check"></i>
+						<span id="clipboardSuggestionText">Clipboard content detected</span>
+					</div>
+					<div class="btn-group btn-group-sm">
+						<button type="button" class="btn btn-primary" id="btnApplyClipboard">
+							<i class="bi bi-check"></i> Use
+						</button>
+						<button type="button" class="btn btn-outline-secondary" data-bs-dismiss="alert">
+							<i class="bi bi-x"></i>
+						</button>
+					</div>
+				</div>
+			</div>
+			
+			<!-- Voice Control Status Banner -->
+			<div class="alert alert-warning d-flex align-items-center" id="voiceStatus" role="alert" style="display: none">
+				<div class="spinner-grow spinner-grow-sm me-2" role="status"></div>
+				<span id="voiceStatusText">Listening...</span>
+				<span id="voiceTranscript" class="ms-2 text-muted fst-italic"></span>
+			</div>
+
+			<!-- Printer Status Panel -->
+			<div class="card mb-3" id="printerStatusCard" style="display: none">
+				<div class="card-header bg-info text-white d-flex justify-content-between align-items-center">
+					<span><i class="bi bi-activity"></i> Printer Status - <span id="printerName">Unknown</span></span>
+					<button type="button" class="btn btn-sm btn-outline-light" id="btnRefreshStatus" title="Refresh Status">
+						<i class="bi bi-arrow-clockwise"></i>
+					</button>
+				</div>
+				<div class="card-body">
+					<div class="row text-center">
+						<div class="col-3">
+							<div class="status-item">
+								<i class="bi bi-battery-half fs-4" id="batteryIcon"></i>
+								<div class="small text-muted">Battery</div>
+								<div id="batteryLevel">--</div>
+							</div>
 						</div>
-						<label for="inputText" class="form-label">Text to print</label>
-						<textarea class="form-control" id="inputText">Hello world</textarea>
-					</div>
-					<div
-						class="tab-pane"
-						id="nav-barcode"
-						role="tabpanel"
-						aria-labelledby="nav-barcode-tab"
-						tabindex="0"
-					>
-						<h2>Barcode</h2>
-						<label for="inputBarcode" class="form-label">Barcode data (CODE128)</label>
-						<input type="text" class="form-control" value="123456" id="inputBarcode" />
-					</div>
-					<div
-						class="tab-pane"
-						id="nav-image"
-						role="tabpanel"
-						aria-labelledby="nav-image-tab"
-						tabindex="0"
-					>
-						<h2>Image</h2>
-						<label for="inputImage" class="form-label">Image file</label>
-						<input type="file" class="form-control" id="inputImage" />
-					</div>
-					<div
-						class="tab-pane"
-						id="nav-qr"
-						role="tabpanel"
-						aria-labelledby="nav-qr-tab"
-						tabindex="0"
-					>
-						<h2>QR Code</h2>
-						<label for="inputQR" class="form-label">QR code data</label>
-						<input type="text" class="form-control" value="https://example.com" id="inputQR" />
-					</div>
-				</div>
-
-				<div>
-					<h2>Label size</h2>
-					<div class="input-group mb-3">
-						<span class="input-group-text">Width (mm)</span>
-						<input
-							type="number"
-							step="1"
-							class="form-control"
-							value="40"
-							aria-label="Width"
-							id="inputWidth"
-						/>
-						<span class="input-group-text">Height (mm)</span>
-						<input
-							type="number"
-							step="1"
-							class="form-control"
-							value="12"
-							aria-label="Height"
-							id="inputHeight"
-						/>
-					</div>
-				</div>
-
-				<div class="d-flex flex-column align-items-start mb-3">
-					<h2>Preview</h2>
-					<p>Images are sent to printer vertically.</p>
-
-					<div class="card shadow-sm">
-						<div class="card-body p-1">
-							<canvas id="canvas"></canvas>
+						<div class="col-3">
+							<div class="status-item">
+								<i class="bi bi-file-earmark fs-4" id="paperIcon"></i>
+								<div class="small text-muted">Paper</div>
+								<div id="paperStatus">--</div>
+							</div>
+						</div>
+						<div class="col-3">
+							<div class="status-item">
+								<i class="bi bi-box fs-4" id="coverIcon"></i>
+								<div class="small text-muted">Cover</div>
+								<div id="coverStatus">--</div>
+							</div>
+						</div>
+						<div class="col-3">
+							<div class="status-item">
+								<i class="bi bi-check-circle fs-4 text-success" id="readyIcon"></i>
+								<div class="small text-muted">Status</div>
+								<div id="printerReadyStatus">Ready</div>
+							</div>
 						</div>
 					</div>
 				</div>
+			</div>
 
-				<button type="submit" class="btn btn-primary">Connect &amp; print</button>
-			</form>
+			<!-- Printer Settings Panel -->
+			<div class="card mb-3" id="printerSettingsCard" style="display: none">
+				<div class="card-header bg-success text-white d-flex justify-content-between align-items-center">
+					<span><i class="bi bi-gear"></i> Print Settings</span>
+					<button type="button" class="btn btn-sm btn-outline-light" data-bs-toggle="collapse" data-bs-target="#settingsCollapse">
+						<i class="bi bi-chevron-down"></i>
+					</button>
+				</div>
+				<div class="collapse show" id="settingsCollapse">
+					<div class="card-body">
+					<div class="row">
+						<div class="col-md-4">
+							<label for="printerModel" class="form-label">Printer Model</label>
+							<select class="form-select" id="printerModel">
+								<option value="d30">Phomemo D30</option>
+								<option value="d35">Phomemo D35</option>
+								<option value="p12pro">Phomemo P12 Pro</option>
+								<option value="m02">Phomemo M02</option>
+								<option value="m110">Phomemo M110</option>
+								<option value="m120">Phomemo M120</option>
+								<option value="m220">Phomemo M220</option>
+								<option value="t02">Phomemo T02</option>
+								<option value="q30">Phomemo Q30</option>
+							</select>
+						</div>
+						<div class="col-md-4" id="densityGroup" style="display: none">
+							<label for="printDensity" class="form-label">Print Density</label>
+							<select class="form-select" id="printDensity">
+								<option value="1">Lowest</option>
+								<option value="3">Very Light</option>
+								<option value="5">Light</option>
+								<option value="7">Medium Light</option>
+								<option value="9" selected>Medium</option>
+								<option value="11">Medium Dark</option>
+								<option value="13">Dark</option>
+								<option value="15">Darkest</option>
+							</select>
+						</div>
+						<div class="col-md-4" id="speedGroup" style="display: none">
+							<label for="printSpeed" class="form-label">Print Speed</label>
+							<select class="form-select" id="printSpeed">
+								<option value="1">Slowest</option>
+								<option value="2">Slow</option>
+								<option value="3">Medium</option>
+								<option value="4">Fast</option>
+								<option value="5" selected>Fastest</option>
+							</select>
+						</div>
+					</div>
+					<div class="row mt-2">
+						<div class="col-md-4" id="labelTypeGroup" style="display: none">
+							<label for="labelType" class="form-label">Label Type</label>
+							<select class="form-select" id="labelType">
+								<option value="10">Label with Gaps</option>
+								<option value="11">Continuous</option>
+								<option value="38">Label with Marks</option>
+							</select>
+						</div>
+						<div class="col-md-4" id="copiesGroup">
+							<label for="printCopies" class="form-label">Number of Copies</label>
+							<input type="number" class="form-control" id="printCopies" value="1" min="1" max="100" />
+						</div>
+						<div class="col-md-4" id="spacingGroup">
+							<label for="labelSpacing" class="form-label">Spacing (lines)</label>
+							<input type="number" class="form-control" id="labelSpacing" value="0" min="0" max="50" />
+						</div>
+					</div>
+				</div>
+			</div>
+			</div>
+
+			<div class="row">
+				<div class="col-lg-6">
+					<nav class="mb-3">
+						<div class="nav nav-tabs" id="nav-tab" role="tablist">
+							<button
+								class="nav-link active"
+								id="nav-text-tab"
+								data-bs-toggle="tab"
+								data-bs-target="#nav-text"
+								type="button"
+								role="tab"
+								aria-controls="nav-text"
+								aria-selected="true"
+							>
+								<i class="bi bi-fonts"></i> Text
+							</button>
+							<button
+								class="nav-link"
+								id="nav-barcode-tab"
+								data-bs-toggle="tab"
+								data-bs-target="#nav-barcode"
+								type="button"
+								role="tab"
+								aria-controls="nav-barcode"
+								aria-selected="false"
+							>
+								<i class="bi bi-upc"></i> Barcode
+							</button>
+							<button
+								class="nav-link"
+								id="nav-image-tab"
+								data-bs-toggle="tab"
+								data-bs-target="#nav-image"
+								type="button"
+								role="tab"
+								aria-controls="nav-image"
+								aria-selected="false"
+							>
+								<i class="bi bi-image"></i> Image
+							</button>
+							<button
+								class="nav-link"
+								id="nav-qr-tab"
+								data-bs-toggle="tab"
+								data-bs-target="#nav-qr"
+								type="button"
+								role="tab"
+								aria-controls="nav-qr"
+								aria-selected="false"
+							>
+								<i class="bi bi-qr-code"></i> QR Code
+							</button>
+							<button
+								class="nav-link"
+								id="nav-draw-tab"
+								data-bs-toggle="tab"
+								data-bs-target="#nav-draw"
+								type="button"
+								role="tab"
+								aria-controls="nav-draw"
+								aria-selected="false"
+							>
+								<i class="bi bi-pencil"></i> Draw
+							</button>
+							<button
+								class="nav-link"
+								id="nav-smart-tab"
+								data-bs-toggle="tab"
+								data-bs-target="#nav-smart"
+								type="button"
+								role="tab"
+								aria-controls="nav-smart"
+								aria-selected="false"
+							>
+								<i class="bi bi-magic"></i> Smart
+							</button>
+							<button
+								class="nav-link"
+								id="nav-templates-tab"
+								data-bs-toggle="tab"
+								data-bs-target="#nav-templates"
+								type="button"
+								role="tab"
+								aria-controls="nav-templates"
+								aria-selected="false"
+							>
+								<i class="bi bi-bookmark"></i> Templates
+							</button>
+						</div>
+					</nav>
+					<form id="printForm">
+						<div class="tab-content mb-3" id="nav-tabContent">
+							<!-- Text Tab -->
+							<div
+								class="tab-pane show active"
+								id="nav-text"
+								role="tabpanel"
+								aria-labelledby="nav-text-tab"
+								tabindex="0"
+							>
+								<h5><i class="bi bi-fonts"></i> Text Label</h5>
+								
+								<!-- Quick Text Presets -->
+								<div class="mb-3">
+									<label class="form-label">Quick Presets</label>
+									<div class="btn-group btn-group-sm flex-wrap" role="group">
+										<button type="button" class="btn btn-outline-secondary quick-text-preset" data-preset="name">
+											<i class="bi bi-person"></i> Name Tag
+										</button>
+										<button type="button" class="btn btn-outline-secondary quick-text-preset" data-preset="price">
+											<i class="bi bi-tag"></i> Price Tag
+										</button>
+										<button type="button" class="btn btn-outline-secondary quick-text-preset" data-preset="warning">
+											<i class="bi bi-exclamation-triangle"></i> Warning
+										</button>
+										<button type="button" class="btn btn-outline-secondary quick-text-preset" data-preset="fragile">
+											<i class="bi bi-box"></i> Fragile
+										</button>
+									</div>
+								</div>
+
+								<div class="row mb-2">
+									<div class="col-6">
+										<label for="inputFontSize" class="form-label">Font Size</label>
+										<div class="input-group">
+											<input
+												type="number"
+												step="1"
+												min="8"
+												max="200"
+												value="48"
+												class="form-control"
+												id="inputFontSize"
+											/>
+											<span class="input-group-text">px</span>
+										</div>
+									</div>
+									<div class="col-6">
+										<label for="textAlign" class="form-label">Alignment</label>
+										<select class="form-select" id="textAlign">
+											<option value="center" selected>Center</option>
+											<option value="left">Left</option>
+											<option value="right">Right</option>
+										</select>
+									</div>
+								</div>
+								<div class="row mb-2">
+									<div class="col-6">
+										<label for="fontFamily" class="form-label">Font</label>
+										<select class="form-select" id="fontFamily">
+											<option value="sans-serif" selected>Sans-serif</option>
+											<option value="serif">Serif</option>
+											<option value="monospace">Monospace</option>
+											<option value="cursive">Cursive</option>
+											<option value="fantasy">Fantasy</option>
+											<option value="Arial">Arial</option>
+											<option value="Helvetica">Helvetica</option>
+											<option value="Times New Roman">Times New Roman</option>
+											<option value="Courier New">Courier New</option>
+											<option value="Georgia">Georgia</option>
+											<option value="Impact">Impact</option>
+											<option value="Comic Sans MS">Comic Sans MS</option>
+										</select>
+									</div>
+									<div class="col-6">
+										<label for="fontWeight" class="form-label">Style</label>
+										<select class="form-select" id="fontWeight">
+											<option value="normal" selected>Normal</option>
+											<option value="bold">Bold</option>
+											<option value="italic">Italic</option>
+											<option value="bold italic">Bold Italic</option>
+										</select>
+									</div>
+								</div>
+								
+								<!-- Text Effects -->
+								<div class="card mb-2">
+									<div class="card-header py-2" data-bs-toggle="collapse" data-bs-target="#textEffectsCollapse" style="cursor: pointer">
+										<small><i class="bi bi-stars"></i> Text Effects <i class="bi bi-chevron-down float-end"></i></small>
+									</div>
+									<div class="collapse" id="textEffectsCollapse">
+										<div class="card-body py-2">
+											<div class="row mb-2">
+												<div class="col-6">
+													<label for="textColor" class="form-label small">Text Color</label>
+													<input type="color" class="form-control form-control-color w-100" id="textColor" value="#000000" />
+												</div>
+												<div class="col-6">
+													<label for="textBgColor" class="form-label small">Background</label>
+													<div class="input-group">
+														<input type="color" class="form-control form-control-color" id="textBgColor" value="#ffffff" />
+														<div class="input-group-text">
+															<input class="form-check-input mt-0" type="checkbox" id="textBgTransparent" checked title="Transparent">
+														</div>
+													</div>
+												</div>
+											</div>
+											<div class="form-check mb-2">
+												<input class="form-check-input" type="checkbox" id="textOutline" />
+												<label class="form-check-label small" for="textOutline">
+													Add outline/border
+												</label>
+											</div>
+											<div class="form-check mb-2">
+												<input class="form-check-input" type="checkbox" id="textShadow" />
+												<label class="form-check-label small" for="textShadow">
+													Add shadow effect
+												</label>
+											</div>
+										</div>
+									</div>
+								</div>
+
+								<label for="inputText" class="form-label">Text to Print</label>
+								<div class="input-group mb-1">
+									<textarea class="form-control" id="inputText" rows="3">Hello world</textarea>
+									<button type="button" class="btn btn-outline-secondary" id="btnEmojiPicker" title="Insert Emoji">
+										<i class="bi bi-emoji-smile"></i>
+									</button>
+								</div>
+								<small class="text-muted">Supports multi-line text. Use Enter for new lines.</small>
+								
+								<!-- Quick Emoji Bar -->
+								<div class="mt-2" id="quickEmojiBar">
+									<span class="emoji-btn" data-emoji="⚠️">⚠️</span>
+									<span class="emoji-btn" data-emoji="✓">✓</span>
+									<span class="emoji-btn" data-emoji="✗">✗</span>
+									<span class="emoji-btn" data-emoji="★">★</span>
+									<span class="emoji-btn" data-emoji="♥">♥</span>
+									<span class="emoji-btn" data-emoji="📦">📦</span>
+									<span class="emoji-btn" data-emoji="🔥">🔥</span>
+									<span class="emoji-btn" data-emoji="💰">💰</span>
+									<span class="emoji-btn" data-emoji="🎁">🎁</span>
+									<span class="emoji-btn" data-emoji="📍">📍</span>
+								</div>
+							</div>
+
+							<!-- Barcode Tab -->
+							<div
+								class="tab-pane"
+								id="nav-barcode"
+								role="tabpanel"
+								aria-labelledby="nav-barcode-tab"
+								tabindex="0"
+							>
+								<h5><i class="bi bi-upc"></i> Barcode Label</h5>
+								<div class="row mb-2">
+									<div class="col-6">
+										<label for="barcodeFormat" class="form-label">Barcode Format</label>
+										<select class="form-select" id="barcodeFormat">
+											<option value="CODE128" selected>CODE128</option>
+											<option value="CODE39">CODE39</option>
+											<option value="EAN13">EAN-13</option>
+											<option value="EAN8">EAN-8</option>
+											<option value="UPC">UPC</option>
+											<option value="ITF14">ITF-14</option>
+											<option value="MSI">MSI</option>
+											<option value="pharmacode">Pharmacode</option>
+										</select>
+									</div>
+									<div class="col-6">
+										<label for="barcodeWidth" class="form-label">Bar Width</label>
+										<input
+											type="number"
+											class="form-control"
+											id="barcodeWidth"
+											value="2"
+											min="1"
+											max="5"
+										/>
+									</div>
+								</div>
+								<div class="form-check mb-2">
+									<input class="form-check-input" type="checkbox" id="barcodeShowText" checked />
+									<label class="form-check-label" for="barcodeShowText">
+										Show barcode text
+									</label>
+								</div>
+								<label for="inputBarcode" class="form-label">Barcode Data</label>
+								<input type="text" class="form-control" value="123456789" id="inputBarcode" />
+							</div>
+
+							<!-- Image Tab -->
+							<div
+								class="tab-pane"
+								id="nav-image"
+								role="tabpanel"
+								aria-labelledby="nav-image-tab"
+								tabindex="0"
+							>
+								<h5><i class="bi bi-image"></i> Image Label</h5>
+								<div class="mb-2">
+									<label for="inputImage" class="form-label">Select Image</label>
+									<input type="file" class="form-control" id="inputImage" accept="image/*" />
+								</div>
+								
+								<!-- Image Adjustments -->
+								<div class="card mb-2">
+									<div class="card-header py-2" data-bs-toggle="collapse" data-bs-target="#imageAdjustCollapse" style="cursor: pointer">
+										<small><i class="bi bi-sliders"></i> Image Adjustments <i class="bi bi-chevron-down float-end"></i></small>
+									</div>
+									<div class="collapse show" id="imageAdjustCollapse">
+										<div class="card-body py-2">
+											<div class="row mb-2">
+												<div class="col-6">
+													<label for="imageBrightness" class="form-label small">Brightness</label>
+													<input type="range" class="form-range" id="imageBrightness" min="-100" max="100" value="0" />
+													<small class="text-muted"><span id="brightnessValue">0</span></small>
+												</div>
+												<div class="col-6">
+													<label for="imageContrast" class="form-label small">Contrast</label>
+													<input type="range" class="form-range" id="imageContrast" min="-100" max="100" value="0" />
+													<small class="text-muted"><span id="contrastValue">0</span></small>
+												</div>
+											</div>
+											<div class="mb-2">
+												<label class="form-label small">Rotation</label>
+												<div class="btn-group btn-group-sm w-100" role="group">
+													<button type="button" class="btn btn-outline-secondary" id="btnRotateLeft" title="Rotate Left">
+														<i class="bi bi-arrow-counterclockwise"></i> -90°
+													</button>
+													<button type="button" class="btn btn-outline-secondary" id="btnRotate180" title="Rotate 180°">
+														<i class="bi bi-arrow-repeat"></i> 180°
+													</button>
+													<button type="button" class="btn btn-outline-secondary" id="btnRotateRight" title="Rotate Right">
+														<i class="bi bi-arrow-clockwise"></i> +90°
+													</button>
+												</div>
+											</div>
+											<div class="btn-group btn-group-sm w-100" role="group">
+												<button type="button" class="btn btn-outline-secondary" id="btnFlipH" title="Flip Horizontal">
+													<i class="bi bi-symmetry-vertical"></i> Flip H
+												</button>
+												<button type="button" class="btn btn-outline-secondary" id="btnFlipV" title="Flip Vertical">
+													<i class="bi bi-symmetry-horizontal"></i> Flip V
+												</button>
+												<button type="button" class="btn btn-outline-secondary" id="btnResetImage" title="Reset">
+													<i class="bi bi-arrow-counterclockwise"></i> Reset
+												</button>
+											</div>
+										</div>
+									</div>
+								</div>
+
+								<div class="row mb-2">
+									<div class="col-6">
+										<label for="ditheringAlgorithm" class="form-label">Dithering Algorithm</label>
+										<select class="form-select" id="ditheringAlgorithm">
+											<option value="threshold">Simple Threshold</option>
+											<option value="floydSteinberg" selected>Floyd-Steinberg</option>
+											<option value="atkinson">Atkinson</option>
+											<option value="orderedBayer">Ordered (Bayer)</option>
+											<option value="burkes">Burkes</option>
+											<option value="sierra2">Sierra-2</option>
+											<option value="jarvisJudiceNinke">Jarvis-Judice-Ninke</option>
+											<option value="stucki">Stucki</option>
+											<option value="random">Random</option>
+											<option value="none">None (pre-processed)</option>
+										</select>
+									</div>
+									<div class="col-6">
+										<label for="imageThreshold" class="form-label">Threshold</label>
+										<input
+											type="range"
+											class="form-range"
+											id="imageThreshold"
+											min="0"
+											max="255"
+											value="128"
+										/>
+										<small class="text-muted">Value: <span id="thresholdValue">128</span></small>
+									</div>
+								</div>
+								<div class="form-check mb-2">
+									<input class="form-check-input" type="checkbox" id="imageInvert" />
+									<label class="form-check-label" for="imageInvert">
+										Invert colors
+									</label>
+								</div>
+								<div class="form-check mb-2">
+									<input class="form-check-input" type="checkbox" id="imageFitToLabel" checked />
+									<label class="form-check-label" for="imageFitToLabel">
+										Scale to fit label
+									</label>
+								</div>
+							</div>
+
+							<!-- QR Code Tab -->
+							<div
+								class="tab-pane"
+								id="nav-qr"
+								role="tabpanel"
+								aria-labelledby="nav-qr-tab"
+								tabindex="0"
+							>
+								<h5><i class="bi bi-qr-code"></i> QR Code Label</h5>
+								<div class="row mb-2">
+									<div class="col-6">
+										<label for="qrErrorCorrection" class="form-label">Error Correction</label>
+										<select class="form-select" id="qrErrorCorrection">
+											<option value="L">Low (7%)</option>
+											<option value="M" selected>Medium (15%)</option>
+											<option value="Q">Quartile (25%)</option>
+											<option value="H">High (30%)</option>
+										</select>
+									</div>
+									<div class="col-6">
+										<label for="qrMargin" class="form-label">Margin</label>
+										<input type="number" class="form-control" id="qrMargin" value="2" min="0" max="10" />
+									</div>
+								</div>
+								<label for="inputQR" class="form-label">QR Code Data</label>
+								<input type="text" class="form-control" value="https://example.com" id="inputQR" />
+								<small class="text-muted">Enter URL, text, or any data to encode</small>
+							</div>
+
+							<!-- Draw Tab -->
+							<div
+								class="tab-pane"
+								id="nav-draw"
+								role="tabpanel"
+								aria-labelledby="nav-draw-tab"
+								tabindex="0"
+							>
+								<h5><i class="bi bi-pencil"></i> Draw Label</h5>
+								<div class="btn-toolbar mb-2" role="toolbar">
+									<div class="btn-group me-2" role="group">
+										<button type="button" class="btn btn-outline-secondary active" id="toolPen" title="Pen">
+											<i class="bi bi-pencil"></i>
+										</button>
+										<button type="button" class="btn btn-outline-secondary" id="toolEraser" title="Eraser">
+											<i class="bi bi-eraser"></i>
+										</button>
+										<button type="button" class="btn btn-outline-secondary" id="toolLine" title="Line">
+											<i class="bi bi-slash-lg"></i>
+										</button>
+										<button type="button" class="btn btn-outline-secondary" id="toolRect" title="Rectangle">
+											<i class="bi bi-square"></i>
+										</button>
+										<button type="button" class="btn btn-outline-secondary" id="toolCircle" title="Circle">
+											<i class="bi bi-circle"></i>
+										</button>
+									</div>
+									<div class="btn-group me-2" role="group">
+										<button type="button" class="btn btn-outline-secondary" id="btnUndo" title="Undo">
+											<i class="bi bi-arrow-counterclockwise"></i>
+										</button>
+										<button type="button" class="btn btn-outline-secondary" id="btnRedo" title="Redo">
+											<i class="bi bi-arrow-clockwise"></i>
+										</button>
+									</div>
+									<div class="btn-group" role="group">
+										<button type="button" class="btn btn-outline-secondary" id="btnClearCanvas" title="Clear">
+											<i class="bi bi-trash"></i>
+										</button>
+										<button type="button" class="btn btn-outline-secondary" id="btnInvertCanvas" title="Invert Colors">
+											<i class="bi bi-circle-half"></i>
+										</button>
+									</div>
+								</div>
+								<div class="row mb-2">
+									<div class="col-6">
+										<label for="drawColor" class="form-label">Color</label>
+										<input type="color" class="form-control form-control-color" id="drawColor" value="#000000" />
+									</div>
+									<div class="col-6">
+										<label for="drawLineWidth" class="form-label">Line Width</label>
+										<input type="range" class="form-range" id="drawLineWidth" min="1" max="20" value="2" />
+									</div>
+								</div>
+								<small class="text-muted">Draw directly on the canvas below. Use tools to create your label.</small>
+							</div>
+
+							<!-- Smart Tab (AI/Camera Features) -->
+							<div
+								class="tab-pane"
+								id="nav-smart"
+								role="tabpanel"
+								aria-labelledby="nav-smart-tab"
+								tabindex="0"
+							>
+								<h5><i class="bi bi-magic"></i> Smart Features</h5>
+								
+								<!-- Camera Scanner -->
+								<div class="card mb-3">
+									<div class="card-header py-2 d-flex justify-content-between align-items-center">
+										<span><i class="bi bi-camera"></i> Camera Scanner</span>
+										<span class="badge bg-info">Beta</span>
+									</div>
+									<div class="card-body">
+										<p class="small text-muted">Scan barcodes, QR codes, or text from your camera.</p>
+										<div class="d-flex gap-2 mb-2">
+											<button type="button" class="btn btn-outline-primary btn-sm" id="btnStartCamera">
+												<i class="bi bi-camera-video"></i> Start Camera
+											</button>
+											<button type="button" class="btn btn-outline-secondary btn-sm" id="btnStopCamera" disabled>
+												<i class="bi bi-stop-circle"></i> Stop
+											</button>
+											<button type="button" class="btn btn-outline-success btn-sm" id="btnCapture" disabled>
+												<i class="bi bi-camera"></i> Capture
+											</button>
+										</div>
+										<div class="camera-preview mb-2" style="display: none" id="cameraPreviewContainer">
+											<video id="cameraVideo" autoplay playsinline muted style="width: 100%; max-height: 200px; border-radius: 4px; background: #000"></video>
+										</div>
+										<div class="d-flex gap-2">
+											<button type="button" class="btn btn-outline-info btn-sm" id="btnScanBarcode" disabled>
+												<i class="bi bi-upc-scan"></i> Scan Barcode
+											</button>
+											<button type="button" class="btn btn-outline-info btn-sm" id="btnScanOCR" disabled>
+												<i class="bi bi-body-text"></i> Scan Text (OCR)
+											</button>
+										</div>
+										<div class="mt-2 small text-muted" id="scanResult" style="display: none">
+											<strong>Result:</strong> <span id="scanResultText"></span>
+										</div>
+									</div>
+								</div>
+								
+								<!-- CSV Batch Import -->
+								<div class="card mb-3">
+									<div class="card-header py-2">
+										<i class="bi bi-file-earmark-spreadsheet"></i> CSV Batch Import
+									</div>
+									<div class="card-body">
+										<p class="small text-muted">Import labels from CSV/Excel file. Each row becomes a label.</p>
+										<div class="mb-2">
+											<input type="file" class="form-control form-control-sm" id="csvFileInput" accept=".csv,.txt" />
+										</div>
+										<div class="form-check mb-2">
+											<input class="form-check-input" type="checkbox" id="csvHasHeader" checked />
+											<label class="form-check-label small" for="csvHasHeader">
+												First row is header
+											</label>
+										</div>
+										<div class="mb-2" id="csvColumnSelect" style="display: none">
+											<label class="form-label small">Select column for labels:</label>
+											<select class="form-select form-select-sm" id="csvColumn"></select>
+										</div>
+										<div class="d-flex gap-2">
+											<button type="button" class="btn btn-primary btn-sm" id="btnImportCSV" disabled>
+												<i class="bi bi-upload"></i> Import & Print
+											</button>
+											<button type="button" class="btn btn-outline-secondary btn-sm" id="btnPreviewCSV" disabled>
+												<i class="bi bi-eye"></i> Preview
+											</button>
+										</div>
+										<div class="mt-2 small" id="csvPreview" style="display: none">
+											<strong>Preview:</strong>
+											<ul class="list-unstyled mb-0" id="csvPreviewList"></ul>
+										</div>
+									</div>
+								</div>
+								
+								<!-- WiFi QR Generator -->
+								<div class="card mb-3">
+									<div class="card-header py-2">
+										<i class="bi bi-wifi"></i> WiFi QR Code Generator
+									</div>
+									<div class="card-body">
+										<p class="small text-muted">Generate QR codes for WiFi network sharing.</p>
+										<div class="row mb-2">
+											<div class="col-6">
+												<label class="form-label small">Network Name (SSID)</label>
+												<input type="text" class="form-control form-control-sm" id="wifiSSID" placeholder="My Network" />
+											</div>
+											<div class="col-6">
+												<label class="form-label small">Password</label>
+												<input type="password" class="form-control form-control-sm" id="wifiPassword" placeholder="••••••••" />
+											</div>
+										</div>
+										<div class="row mb-2">
+											<div class="col-6">
+												<label class="form-label small">Security</label>
+												<select class="form-select form-select-sm" id="wifiSecurity">
+													<option value="WPA" selected>WPA/WPA2</option>
+													<option value="WEP">WEP</option>
+													<option value="nopass">None</option>
+												</select>
+											</div>
+											<div class="col-6 d-flex align-items-end">
+												<button type="button" class="btn btn-primary btn-sm w-100" id="btnGenerateWifiQR">
+													<i class="bi bi-qr-code"></i> Generate
+												</button>
+											</div>
+										</div>
+									</div>
+								</div>
+								
+								<!-- Contact vCard Generator -->
+								<div class="card mb-3">
+									<div class="card-header py-2">
+										<i class="bi bi-person-vcard"></i> Contact Card Generator
+									</div>
+									<div class="card-body">
+										<p class="small text-muted">Generate QR codes for contact information.</p>
+										<div class="row mb-2">
+											<div class="col-6">
+												<label class="form-label small">Name</label>
+												<input type="text" class="form-control form-control-sm" id="vcardName" placeholder="John Doe" />
+											</div>
+											<div class="col-6">
+												<label class="form-label small">Phone</label>
+												<input type="tel" class="form-control form-control-sm" id="vcardPhone" placeholder="+1234567890" />
+											</div>
+										</div>
+										<div class="row mb-2">
+											<div class="col-6">
+												<label class="form-label small">Email</label>
+												<input type="email" class="form-control form-control-sm" id="vcardEmail" placeholder="john@example.com" />
+											</div>
+											<div class="col-6">
+												<label class="form-label small">Company</label>
+												<input type="text" class="form-control form-control-sm" id="vcardCompany" placeholder="Acme Inc." />
+											</div>
+										</div>
+										<button type="button" class="btn btn-primary btn-sm" id="btnGenerateVCard">
+											<i class="bi bi-qr-code"></i> Generate Contact QR
+										</button>
+									</div>
+								</div>
+								
+								<!-- Print Queue -->
+								<div class="card mb-3">
+									<div class="card-header py-2 d-flex justify-content-between align-items-center">
+										<span><i class="bi bi-list-task"></i> Print Queue</span>
+										<span class="badge bg-secondary" id="queueCount">0</span>
+									</div>
+									<div class="card-body">
+										<p class="small text-muted">Queue multiple labels for sequential printing.</p>
+										<div id="printQueueList" class="list-group list-group-flush mb-2" style="max-height: 150px; overflow-y: auto">
+											<div class="text-muted text-center py-2 small">
+												Queue is empty
+											</div>
+										</div>
+										<div class="d-flex gap-2">
+											<button type="button" class="btn btn-success btn-sm" id="btnProcessQueue" disabled>
+												<i class="bi bi-play"></i> Print Queue
+											</button>
+											<button type="button" class="btn btn-outline-danger btn-sm" id="btnClearQueue" disabled>
+												<i class="bi bi-trash"></i> Clear
+											</button>
+											<button type="button" class="btn btn-outline-primary btn-sm" id="btnAddToQueue">
+												<i class="bi bi-plus"></i> Add Current
+											</button>
+										</div>
+									</div>
+								</div>
+							</div>
+
+							<!-- Templates Tab -->
+							<div
+								class="tab-pane"
+								id="nav-templates"
+								role="tabpanel"
+								aria-labelledby="nav-templates-tab"
+								tabindex="0"
+							>
+								<h5><i class="bi bi-bookmark"></i> Saved Templates</h5>
+								<div class="d-flex gap-2 mb-3">
+									<button type="button" class="btn btn-primary btn-sm" id="btnSaveTemplate">
+										<i class="bi bi-save"></i> Save Current
+									</button>
+									<button type="button" class="btn btn-outline-secondary btn-sm" id="btnExportTemplates">
+										<i class="bi bi-download"></i> Export All
+									</button>
+									<button type="button" class="btn btn-outline-secondary btn-sm" id="btnImportTemplates">
+										<i class="bi bi-upload"></i> Import
+									</button>
+									<input type="file" id="importTemplateFile" accept=".json" style="display: none" />
+								</div>
+								<div id="templatesList" class="list-group">
+									<div class="text-muted text-center py-3">
+										<i class="bi bi-inbox fs-1"></i>
+										<p>No saved templates yet</p>
+									</div>
+								</div>
+							</div>
+						</div>
+
+						<!-- Label Size Section -->
+						<div class="card mb-3">
+							<div class="card-header">
+								<i class="bi bi-rulers"></i> Label Size
+							</div>
+							<div class="card-body">
+								<div class="row">
+									<div class="col-md-6 mb-2">
+										<label for="labelPreset" class="form-label">Preset</label>
+										<select class="form-select" id="labelPreset">
+											<option value="custom">Custom</option>
+											<option value="40x12" selected>Standard (40×12mm)</option>
+											<option value="50x12">Long (50×12mm)</option>
+											<option value="12x12">Square (12×12mm)</option>
+											<option value="fruit">Fruit Label</option>
+										</select>
+									</div>
+								</div>
+								<div class="row" id="customSizeInputs">
+									<div class="col-6">
+										<label for="inputWidth" class="form-label">Width (mm)</label>
+										<input
+											type="number"
+											step="1"
+											class="form-control"
+											value="40"
+											min="5"
+											max="100"
+											id="inputWidth"
+										/>
+									</div>
+									<div class="col-6">
+										<label for="inputHeight" class="form-label">Height (mm)</label>
+										<input
+											type="number"
+											step="1"
+											class="form-control"
+											value="12"
+											min="5"
+											max="100"
+											id="inputHeight"
+										/>
+									</div>
+								</div>
+							</div>
+						</div>
+
+						<!-- Preview Section -->
+						<div class="card mb-3">
+							<div class="card-header d-flex justify-content-between align-items-center">
+								<span><i class="bi bi-eye"></i> Preview</span>
+								<div>
+									<button type="button" class="btn btn-sm btn-outline-secondary me-1" id="btnZoomIn" title="Zoom In">
+										<i class="bi bi-zoom-in"></i>
+									</button>
+									<button type="button" class="btn btn-sm btn-outline-secondary me-1" id="btnZoomOut" title="Zoom Out">
+										<i class="bi bi-zoom-out"></i>
+									</button>
+									<small class="text-muted ms-2">Rotated 90° for printing</small>
+								</div>
+							</div>
+							<div class="card-body text-center" style="overflow: auto; max-height: 400px;">
+								<div class="canvas-wrapper d-inline-block" id="canvasContainer">
+									<canvas id="canvas"></canvas>
+								</div>
+							</div>
+						</div>
+
+						<!-- Print Controls -->
+						<div class="d-flex gap-2 flex-wrap mb-2">
+							<button type="submit" class="btn btn-primary btn-lg" id="btnPrint">
+								<i class="bi bi-printer"></i> Print Label
+							</button>
+							<button type="button" class="btn btn-outline-success" id="btnBatchPrint" title="Print multiple different labels">
+								<i class="bi bi-list-check"></i> Batch Print
+							</button>
+							<button type="button" class="btn btn-outline-secondary" id="btnDownload">
+								<i class="bi bi-download"></i> Download
+							</button>
+							<button type="button" class="btn btn-outline-info" id="btnPreviewDithering">
+								<i class="bi bi-palette"></i> Dithering
+							</button>
+						</div>
+						
+						<!-- Quick Print Options -->
+						<div class="btn-group btn-group-sm mb-3" role="group">
+							<button type="button" class="btn btn-outline-secondary" id="btnPrint1x" title="Print 1 copy">×1</button>
+							<button type="button" class="btn btn-outline-secondary" id="btnPrint3x" title="Print 3 copies">×3</button>
+							<button type="button" class="btn btn-outline-secondary" id="btnPrint5x" title="Print 5 copies">×5</button>
+							<button type="button" class="btn btn-outline-secondary" id="btnPrint10x" title="Print 10 copies">×10</button>
+						</div>
+
+						<!-- Progress Bar -->
+						<div class="progress mt-3" style="display: none" id="printProgress">
+							<div
+								class="progress-bar progress-bar-striped progress-bar-animated"
+								role="progressbar"
+								style="width: 0%"
+								id="progressBar"
+							></div>
+						</div>
+					</form>
+				</div>
+
+				<!-- Info Panel -->
+				<div class="col-lg-6 mt-4 mt-lg-0">
+					<div class="card">
+						<div class="card-header">
+							<i class="bi bi-info-circle"></i> About
+						</div>
+						<div class="card-body">
+							<p>
+								A comprehensive web interface for Phomemo Bluetooth label printers.
+								Print text, barcodes, images, and QR codes directly from your browser.
+							</p>
+							<h6>Supported Printers:</h6>
+							<ul class="small">
+								<li><strong>D30, D35</strong> - Small label printers (12mm)</li>
+								<li><strong>P12 Pro</strong> - Portable label maker</li>
+								<li><strong>M02, M02S</strong> - Receipt/photo printers</li>
+								<li><strong>M110, M120, M220</strong> - Label printers with advanced settings</li>
+								<li><strong>T02</strong> - Cat thermal printer</li>
+								<li><strong>Q30</strong> - Thermal label printer</li>
+							</ul>
+							<h6>Features:</h6>
+							<ul class="small">
+								<li>Multiple dithering algorithms for optimal image quality</li>
+								<li>Various barcode formats (CODE128, QR, EAN, etc.)</li>
+								<li>Custom fonts and text styling</li>
+								<li>Adjustable print density and speed (M-series)</li>
+								<li>Multiple copies with spacing control</li>
+								<li>Label presets and custom sizes</li>
+								<li>Canvas drawing tools for custom labels</li>
+								<li>Template saving and management</li>
+								<li>Keyboard shortcuts for power users</li>
+							</ul>
+							<h6>Keyboard Shortcuts:</h6>
+							<ul class="small">
+								<li><kbd>Ctrl</kbd>+<kbd>P</kbd> - Print</li>
+								<li><kbd>Ctrl</kbd>+<kbd>S</kbd> - Save template</li>
+								<li><kbd>Ctrl</kbd>+<kbd>Z</kbd> - Undo (Draw mode)</li>
+								<li><kbd>Ctrl</kbd>+<kbd>Y</kbd> - Redo (Draw mode)</li>
+							</ul>
+						</div>
+					</div>
+
+					<!-- Print History Card -->
+					<div class="card mt-3">
+						<div class="card-header d-flex justify-content-between align-items-center">
+							<span><i class="bi bi-clock-history"></i> Print History</span>
+							<button type="button" class="btn btn-sm btn-outline-secondary" id="btnClearHistory">
+								<i class="bi bi-trash"></i>
+							</button>
+						</div>
+						<div class="card-body" style="max-height: 200px; overflow-y: auto">
+							<div id="printHistoryList" class="small">
+								<div class="text-muted text-center py-2">
+									No print history yet
+								</div>
+							</div>
+						</div>
+					</div>
+
+					<!-- Dithering Info Card -->
+					<div class="card mt-3" id="ditheringInfo">
+						<div class="card-header">
+							<i class="bi bi-palette"></i> Dithering Algorithms
+						</div>
+						<div class="card-body small">
+							<dl class="row mb-0">
+								<dt class="col-sm-4">Floyd-Steinberg</dt>
+								<dd class="col-sm-8">Classic error-diffusion, good quality</dd>
+								<dt class="col-sm-4">Atkinson</dt>
+								<dd class="col-sm-8">Lighter, good for text/line art</dd>
+								<dt class="col-sm-4">Ordered Bayer</dt>
+								<dd class="col-sm-8">Pattern-based, crosshatch effect</dd>
+								<dt class="col-sm-4">Jarvis-Judice-Ninke</dt>
+								<dd class="col-sm-8">High quality, smoother results</dd>
+								<dt class="col-sm-4">Threshold</dt>
+								<dd class="col-sm-8">Simple B&amp;W conversion</dd>
+							</dl>
+						</div>
+					</div>
+				</div>
+			</div>
 		</div>
 
+		<!-- Dithering Preview Modal -->
+		<div class="modal fade" id="ditheringModal" tabindex="-1">
+			<div class="modal-dialog modal-xl">
+				<div class="modal-content">
+					<div class="modal-header">
+						<h5 class="modal-title">Dithering Algorithm Comparison</h5>
+						<button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+					</div>
+					<div class="modal-body">
+						<div class="row" id="ditheringPreviewContainer">
+							<!-- Dithering previews will be inserted here -->
+						</div>
+					</div>
+				</div>
+			</div>
+		</div>
+
+		<!-- Save Template Modal -->
+		<div class="modal fade" id="saveTemplateModal" tabindex="-1">
+			<div class="modal-dialog">
+				<div class="modal-content">
+					<div class="modal-header">
+						<h5 class="modal-title"><i class="bi bi-save"></i> Save Template</h5>
+						<button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+					</div>
+					<div class="modal-body">
+						<div class="mb-3">
+							<label for="templateName" class="form-label">Template Name</label>
+							<input type="text" class="form-control" id="templateName" placeholder="My Label Template" />
+						</div>
+						<div class="mb-3">
+							<label class="form-label">Preview</label>
+							<div class="border rounded p-2 text-center bg-light">
+								<canvas id="templatePreview" style="max-width: 100%; height: auto"></canvas>
+							</div>
+						</div>
+					</div>
+					<div class="modal-footer">
+						<button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+						<button type="button" class="btn btn-primary" id="btnConfirmSaveTemplate">
+							<i class="bi bi-save"></i> Save
+						</button>
+					</div>
+				</div>
+			</div>
+		</div>
+
+		<!-- Batch Print Modal -->
+		<div class="modal fade" id="batchPrintModal" tabindex="-1">
+			<div class="modal-dialog modal-lg">
+				<div class="modal-content">
+					<div class="modal-header">
+						<h5 class="modal-title"><i class="bi bi-list-check"></i> Batch Print</h5>
+						<button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+					</div>
+					<div class="modal-body">
+						<p class="text-muted small">Add multiple text labels to print in sequence. Great for printing different names, prices, or serial numbers.</p>
+						
+						<div class="mb-3">
+							<label class="form-label">Batch Text Items (one per line)</label>
+							<textarea class="form-control" id="batchTextInput" rows="6" placeholder="Item 1&#10;Item 2&#10;Item 3&#10;..."></textarea>
+							<small class="text-muted">Enter each label text on a separate line</small>
+						</div>
+						
+						<div class="row mb-3">
+							<div class="col-md-4">
+								<label for="batchCopiesEach" class="form-label">Copies per Item</label>
+								<input type="number" class="form-control" id="batchCopiesEach" value="1" min="1" max="100" />
+							</div>
+							<div class="col-md-4">
+								<label for="batchDelay" class="form-label">Delay (ms)</label>
+								<input type="number" class="form-control" id="batchDelay" value="500" min="100" max="5000" step="100" />
+							</div>
+							<div class="col-md-4">
+								<label class="form-label">Total Labels</label>
+								<div class="form-control-plaintext fw-bold" id="batchTotalCount">0</div>
+							</div>
+						</div>
+						
+						<div class="progress mb-3" style="display: none" id="batchProgress">
+							<div class="progress-bar progress-bar-striped progress-bar-animated" role="progressbar" style="width: 0%" id="batchProgressBar"></div>
+						</div>
+						
+						<div class="alert alert-info small" id="batchStatus" style="display: none">
+							<i class="bi bi-info-circle"></i> <span id="batchStatusText">Ready to print</span>
+						</div>
+					</div>
+					<div class="modal-footer">
+						<button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+						<button type="button" class="btn btn-success" id="btnStartBatchPrint">
+							<i class="bi bi-printer"></i> Start Batch Print
+						</button>
+					</div>
+				</div>
+			</div>
+		</div>
+
+		<!-- Emoji Picker Modal -->
+		<div class="modal fade" id="emojiPickerModal" tabindex="-1">
+			<div class="modal-dialog modal-sm">
+				<div class="modal-content">
+					<div class="modal-header py-2">
+						<h6 class="modal-title"><i class="bi bi-emoji-smile"></i> Emoji Picker</h6>
+						<button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+					</div>
+					<div class="modal-body">
+						<div class="emoji-grid" id="emojiGrid">
+							<!-- Emoji grid populated by JS -->
+						</div>
+					</div>
+				</div>
+			</div>
+		</div>
+
+		<!-- Toast Container -->
 		<div class="toast-container position-fixed bottom-0 start-0 p-3">
 			<div
 				id="errorToast"
@@ -181,6 +1183,7 @@
 			>
 				<div class="d-flex">
 					<div class="toast-body">
+						<i class="bi bi-exclamation-triangle"></i>
 						<span id="errorText"></span>
 					</div>
 					<button
@@ -189,6 +1192,104 @@
 						data-bs-dismiss="toast"
 						aria-label="Close"
 					></button>
+				</div>
+			</div>
+			<div
+				id="successToast"
+				class="toast align-items-center text-bg-success border-0"
+				role="alert"
+				aria-live="assertive"
+				aria-atomic="true"
+			>
+				<div class="d-flex">
+					<div class="toast-body">
+						<i class="bi bi-check-circle"></i>
+						<span id="successText"></span>
+					</div>
+					<button
+						type="button"
+						class="btn-close btn-close-white me-2 m-auto"
+						data-bs-dismiss="toast"
+						aria-label="Close"
+					></button>
+				</div>
+			</div>
+		</div>
+
+		<!-- Voice Commands Modal -->
+		<div class="modal fade" id="voiceCommandsModal" tabindex="-1">
+			<div class="modal-dialog modal-lg">
+				<div class="modal-content">
+					<div class="modal-header">
+						<h5 class="modal-title"><i class="bi bi-mic"></i> Voice Commands</h5>
+						<button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+					</div>
+					<div class="modal-body">
+						<p class="text-muted">Control the app with your voice! Click the microphone button and say a command.</p>
+						
+						<div class="row">
+							<div class="col-md-6">
+								<h6><i class="bi bi-printer"></i> Printing</h6>
+								<ul class="small">
+									<li>"Print" or "Print label"</li>
+									<li>"Print one/three/five/ten"</li>
+								</ul>
+								
+								<h6><i class="bi bi-collection"></i> Navigation</h6>
+								<ul class="small">
+									<li>"Text tab" / "Go to text"</li>
+									<li>"Barcode tab" / "QR code tab"</li>
+									<li>"Image tab" / "Draw tab"</li>
+									<li>"Templates tab" / "Smart tab"</li>
+								</ul>
+								
+								<h6><i class="bi bi-bluetooth"></i> Connection</h6>
+								<ul class="small">
+									<li>"Connect" or "Connect printer"</li>
+									<li>"Disconnect"</li>
+								</ul>
+							</div>
+							<div class="col-md-6">
+								<h6><i class="bi bi-fonts"></i> Text Input</h6>
+								<ul class="small">
+									<li>"Type [your text]" - Sets text</li>
+									<li>"Write [your text]" - Sets text</li>
+									<li>"Clear" or "Clear text"</li>
+									<li>"Bigger text" / "Smaller text"</li>
+								</ul>
+								
+								<h6><i class="bi bi-tag"></i> Presets</h6>
+								<ul class="small">
+									<li>"Name tag" / "Price tag"</li>
+									<li>"Warning label" / "Fragile label"</li>
+								</ul>
+								
+								<h6><i class="bi bi-arrow-counterclockwise"></i> Actions</h6>
+								<ul class="small">
+									<li>"Undo" / "Redo"</li>
+									<li>"Save template"</li>
+									<li>"Download" or "Download image"</li>
+									<li>"Stop listening"</li>
+								</ul>
+							</div>
+						</div>
+						
+						<div class="alert alert-info mt-3 small">
+							<i class="bi bi-info-circle"></i> Voice control works best in Chrome. Make sure to allow microphone access when prompted.
+						</div>
+					</div>
+					<div class="modal-footer">
+						<div class="form-check me-auto">
+							<input class="form-check-input" type="checkbox" id="voiceFeedbackEnabled" checked />
+							<label class="form-check-label small" for="voiceFeedbackEnabled">
+								Enable voice feedback
+							</label>
+						</div>
+						<button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+						<button type="button" class="btn btn-danger" id="btnStartVoiceFromModal">
+							<i class="bi bi-mic"></i> Start Listening
+						</button>
+					</div>
 				</div>
 			</div>
 		</div>
@@ -207,7 +1308,12 @@
 			referrerpolicy="no-referrer"
 			defer
 		></script>
-		<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcode/1.5.1/qrcode.min.js" integrity="sha512-PEhlWBZBrQL7flpJPY8lXx8tIN7HWX912GzGhFTDqA3iWFrakVH3lVHomCoU9BhfKzgxfEk6EG2C3xej+9srOQ==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+		<script
+			src="https://cdnjs.cloudflare.com/ajax/libs/qrcode/1.5.1/qrcode.min.js"
+			integrity="sha512-PEhlWBZBrQL7flpJPY8lXx8tIN7HWX912GzGhFTDqA3iWFrakVH3lVHomCoU9BhfKzgxfEk6EG2C3xej+9srOQ=="
+			crossorigin="anonymous"
+			referrerpolicy="no-referrer"
+		></script>
 		<script type="module" src="index.js" defer></script>
 	</body>
 </html>

@@ -1,107 +1,366 @@
 "use strict";
 
 import { drawText } from "https://cdn.jsdelivr.net/npm/canvas-txt@4.1.1/+esm";
-import { printCanvas } from "./src/printer.js";
+import {
+	printCanvas,
+	printCanvasAdvanced,
+	PrinterModel,
+	PrinterConfigs,
+	isDType,
+	isMType,
+} from "./src/printer.js";
+import { applyDithering, DitheringAlgorithm, DitheringInfo } from "./src/dithering.js";
+import { detectPrinterModel } from "./src/printerModels.js";
+import { CanvasEditor } from "./src/canvasEditor.js";
+import { printerStatus, StatusEventType } from "./src/printerStatus.js";
+import {
+	getTemplates,
+	saveTemplate,
+	deleteTemplate,
+	getTemplateById,
+	exportTemplates,
+	importTemplates,
+	getPrintHistory,
+	addToHistory,
+	clearHistory,
+	getSettings,
+	saveSettings,
+	saveDevice,
+	getSavedDevices,
+} from "./src/storage.js";
+import { voiceControl, voiceFeedback } from "./src/voiceControl.js";
+import { cameraScanner, ocrScanner } from "./src/cameraScanner.js";
+import { smartClipboard, CSVParser, printQueue } from "./src/smartFeatures.js";
 
 const $ = document.querySelector.bind(document);
 const $all = document.querySelectorAll.bind(document);
 
-const labelSize = { width: 40, height: 12 };
+// State management
+const state = {
+	labelSize: { width: 40, height: 12 },
+	connected: false,
+	printerModel: PrinterModel.D30,
+	device: null,
+	characteristic: null,
+	notifyCharacteristic: null,
+	canvasEditor: null,
+	currentTab: "text",
+	zoomLevel: 1, // Canvas zoom level
+	voiceActive: false,
+	csvData: null,
+	deferredInstallPrompt: null,
+};
+
+// ================== Utility Functions ==================
+
+const handleError = (err) => {
+	console.error(err);
+	const toast = bootstrap.Toast.getOrCreateInstance($("#errorToast"));
+	$("#errorText").textContent = err.toString();
+	toast.show();
+};
+
+const showSuccess = (message) => {
+	const toast = bootstrap.Toast.getOrCreateInstance($("#successToast"));
+	$("#successText").textContent = message;
+	toast.show();
+};
+
+const updateConnectionStatus = (connected, deviceName = null) => {
+	const statusBadge = $("#connectionStatus");
+	state.connected = connected;
+
+	if (connected) {
+		statusBadge.textContent = `Connected: ${deviceName}`;
+		statusBadge.classList.remove("bg-secondary");
+		statusBadge.classList.add("connected", "bg-success");
+		$("#btnConnect").innerHTML = '<i class="bi bi-bluetooth"></i> Disconnect';
+		$("#printerSettingsCard").style.display = "block";
+		$("#printerStatusCard").style.display = "block";
+		$("#printerName").textContent = deviceName;
+	} else {
+		statusBadge.innerHTML = '<i class="bi bi-bluetooth"></i> Not Connected';
+		statusBadge.classList.remove("connected", "bg-success");
+		statusBadge.classList.add("bg-secondary");
+		$("#btnConnect").innerHTML = '<i class="bi bi-bluetooth"></i> Connect Printer';
+		$("#printerSettingsCard").style.display = "none";
+		$("#printerStatusCard").style.display = "none";
+	}
+};
+
+const updatePrinterSettings = (model) => {
+	state.printerModel = model;
+	const config = PrinterConfigs[model];
+
+	// Show/hide relevant settings based on printer capabilities
+	$("#densityGroup").style.display = config?.supportsDensity ? "block" : "none";
+	$("#speedGroup").style.display = config?.supportsSpeed ? "block" : "none";
+	$("#labelTypeGroup").style.display = config?.supportsLabelType ? "block" : "none";
+
+	// Update label presets
+	updateLabelPresets(model);
+};
+
+const updateLabelPresets = (model) => {
+	const config = PrinterConfigs[model];
+	const select = $("#labelPreset");
+
+	// Clear existing options except "Custom"
+	while (select.options.length > 1) {
+		select.remove(1);
+	}
+
+	// Add presets for this printer
+	if (config?.presets) {
+		config.presets.forEach((preset) => {
+			const option = document.createElement("option");
+			option.value = `${preset.width}x${preset.height}`;
+			option.textContent = preset.name;
+			select.appendChild(option);
+		});
+	}
+
+	// Set default
+	if (config?.defaultLabelSize) {
+		$("#inputWidth").value = config.defaultLabelSize.width;
+		$("#inputHeight").value = config.defaultLabelSize.height;
+	}
+};
+
+const showProgress = (show, value = 0) => {
+	const progressDiv = $("#printProgress");
+	const progressBar = $("#progressBar");
+
+	progressDiv.style.display = show ? "flex" : "none";
+	progressBar.style.width = `${value}%`;
+	progressBar.textContent = `${Math.round(value)}%`;
+};
+
+// ================== Canvas Drawing Functions ==================
 
 const updateLabelSize = (canvas) => {
 	const inputWidth = $("#inputWidth").valueAsNumber;
 	const inputHeight = $("#inputHeight").valueAsNumber;
-	if (isNaN(inputWidth) || isNaN(inputHeight)) {
-		handleError("label size invalid");
+
+	if (isNaN(inputWidth) || isNaN(inputHeight) || inputWidth < 1 || inputHeight < 1) {
+		handleError("Invalid label size");
 		return;
 	}
 
-	labelSize.width = inputWidth;
-	labelSize.height = inputHeight;
+	state.labelSize.width = inputWidth;
+	state.labelSize.height = inputHeight;
 
 	// Image sent to printer is printed top to bottom, so reverse width and height
-	canvas.width = labelSize.height * 8;
-	canvas.height = labelSize.width * 8;
+	// 8 pixels per mm at 203 DPI
+	canvas.width = state.labelSize.height * 8;
+	canvas.height = state.labelSize.width * 8;
+
+	// Trigger redraw of current tab
+	const activeTab = $(".nav-link.active");
+	if (activeTab) {
+		activeTab.click();
+	}
 };
 
 const updateCanvasText = (canvas) => {
 	const text = $("#inputText").value;
 	const fontSize = $("#inputFontSize").valueAsNumber;
-	if (isNaN(fontSize)) {
-		handleError("font size invalid");
+	const textAlign = $("#textAlign").value;
+	const fontFamily = $("#fontFamily").value;
+	const fontWeight = $("#fontWeight").value;
+	const textColor = $("#textColor")?.value || "#000000";
+	const textOutline = $("#textOutline")?.checked || false;
+	const textShadow = $("#textShadow")?.checked || false;
+	const textBgTransparent = $("#textBgTransparent")?.checked ?? true;
+	const textBgColor = $("#textBgColor")?.value || "#ffffff";
+
+	if (isNaN(fontSize) || fontSize < 1) {
+		handleError("Invalid font size");
 		return;
 	}
 
 	const ctx = canvas.getContext("2d");
-	ctx.fillStyle = "#fff";
+	
+	// Background
+	ctx.fillStyle = textBgTransparent ? "#fff" : textBgColor;
 	ctx.fillRect(0, 0, canvas.width, canvas.height);
 
+	ctx.save();
 	ctx.translate(canvas.width / 2, canvas.height / 2);
 	ctx.rotate(Math.PI / 2);
 
-	ctx.fillStyle = "#000";
-	ctx.textAlign = "center";
+	ctx.fillStyle = textColor;
+	ctx.textAlign = textAlign;
 	ctx.textBaseline = "top";
+
+	// Parse font weight
+	let fontStyle = "";
+	if (fontWeight.includes("bold")) fontStyle += "bold ";
+	if (fontWeight.includes("italic")) fontStyle += "italic ";
+
+	// Apply shadow effect
+	if (textShadow) {
+		ctx.shadowColor = "rgba(0, 0, 0, 0.5)";
+		ctx.shadowBlur = 4;
+		ctx.shadowOffsetX = 2;
+		ctx.shadowOffsetY = 2;
+	}
+
 	drawText(ctx, text, {
 		x: -canvas.height / 2,
 		y: -canvas.width / 2,
 		width: canvas.height,
 		height: canvas.width,
-		font: "sans-serif",
+		font: fontFamily,
 		fontSize,
+		fontStyle: fontStyle.trim() || "normal",
+		align: textAlign,
+		vAlign: "middle",
 	});
 
-	ctx.rotate(-Math.PI / 2);
-	ctx.translate(-canvas.width / 2, -canvas.height / 2);
+	// Apply outline effect (draw text again with stroke)
+	if (textOutline) {
+		ctx.shadowColor = "transparent";
+		ctx.strokeStyle = textColor === "#000000" ? "#ffffff" : "#000000";
+		ctx.lineWidth = 2;
+		ctx.font = `${fontStyle}${fontSize}px ${fontFamily}`;
+		
+		// Draw outline by stroking text
+		const lines = text.split("\n");
+		const lineHeight = fontSize * 1.2;
+		const startY = -canvas.width / 2 + (canvas.width - lines.length * lineHeight) / 2;
+		
+		lines.forEach((line, i) => {
+			let x = 0;
+			if (textAlign === "left") x = -canvas.height / 2;
+			else if (textAlign === "right") x = canvas.height / 2;
+			ctx.strokeText(line, x, startY + i * lineHeight);
+		});
+	}
+
+	ctx.restore();
 };
 
 const updateCanvasBarcode = (canvas) => {
 	const barcodeData = $("#inputBarcode").value;
+	const barcodeFormat = $("#barcodeFormat").value;
+	const barcodeWidth = parseInt($("#barcodeWidth").value) || 2;
+	const showText = $("#barcodeShowText").checked;
+
 	const image = document.createElement("img");
+
 	image.addEventListener("load", () => {
 		const ctx = canvas.getContext("2d");
 		ctx.fillStyle = "#fff";
 		ctx.fillRect(0, 0, canvas.width, canvas.height);
 
+		ctx.save();
 		ctx.translate(canvas.width / 2, canvas.height / 2);
 		ctx.rotate(Math.PI / 2);
 
 		ctx.imageSmoothingEnabled = false;
-		ctx.drawImage(image, -image.width / 2, -image.height / 2);
 
-		ctx.rotate(-Math.PI / 2);
-		ctx.translate(-canvas.width / 2, -canvas.height / 2);
+		// Scale barcode to fit
+		const scale = Math.min(canvas.height / image.width, canvas.width / image.height) * 0.9;
+		const drawWidth = image.width * scale;
+		const drawHeight = image.height * scale;
+
+		ctx.drawImage(image, -drawWidth / 2, -drawHeight / 2, drawWidth, drawHeight);
+		ctx.restore();
 	});
 
-	JsBarcode(image, barcodeData, {
-		format: "CODE128",
-		width: 2,
-		height: labelSize.height * 7,
-		displayValue: false,
+	image.addEventListener("error", () => {
+		handleError("Invalid barcode data for selected format");
 	});
+
+	try {
+		JsBarcode(image, barcodeData, {
+			format: barcodeFormat,
+			width: barcodeWidth,
+			height: state.labelSize.height * 6,
+			displayValue: showText,
+			margin: 5,
+		});
+	} catch (e) {
+		handleError(`Barcode error: ${e.message}`);
+	}
 };
 
-const drawImageToCanvas = (ctx, url, doScale = true) => {
+const drawImageToCanvas = (ctx, url, canvas, options = {}) => {
+	const { 
+		doScale = true, 
+		dithering = DitheringAlgorithm.FLOYD_STEINBERG, 
+		threshold = 128, 
+		invert = false,
+		brightness = 0,
+		contrast = 0
+	} = options;
+
 	const img = new Image();
+
 	img.addEventListener("load", () => {
 		ctx.fillStyle = "#fff";
 		ctx.fillRect(0, 0, canvas.width, canvas.height);
 
+		ctx.save();
 		ctx.translate(canvas.width / 2, canvas.height / 2);
 		ctx.rotate(Math.PI / 2);
 
-		ctx.imageSmoothingEnabled = false;
-		// draw image in center of canvas, scaled to fit
+		ctx.imageSmoothingEnabled = true;
+
+		// Calculate scale
 		const scale = doScale ? Math.min(canvas.height / img.width, canvas.width / img.height) : 1;
 		const drawWidth = img.width * scale;
 		const drawHeight = img.height * scale;
-		ctx.drawImage(img, -drawWidth / 2, -drawHeight / 2, drawWidth, drawHeight);
 
-		ctx.rotate(-Math.PI / 2);
-		ctx.translate(-canvas.width / 2, -canvas.height / 2);
+		ctx.drawImage(img, -drawWidth / 2, -drawHeight / 2, drawWidth, drawHeight);
+		ctx.restore();
+
+		// Apply brightness/contrast and dithering
+		const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+		const data = imageData.data;
+
+		// Apply brightness and contrast
+		if (brightness !== 0 || contrast !== 0) {
+			const contrastFactor = (259 * (contrast + 255)) / (255 * (259 - contrast));
+			
+			for (let i = 0; i < data.length; i += 4) {
+				// Apply brightness
+				let r = data[i] + brightness;
+				let g = data[i + 1] + brightness;
+				let b = data[i + 2] + brightness;
+				
+				// Apply contrast
+				r = contrastFactor * (r - 128) + 128;
+				g = contrastFactor * (g - 128) + 128;
+				b = contrastFactor * (b - 128) + 128;
+				
+				// Clamp values
+				data[i] = Math.max(0, Math.min(255, r));
+				data[i + 1] = Math.max(0, Math.min(255, g));
+				data[i + 2] = Math.max(0, Math.min(255, b));
+			}
+		}
+
+		// Invert if requested
+		if (invert) {
+			for (let i = 0; i < data.length; i += 4) {
+				data[i] = 255 - data[i];
+				data[i + 1] = 255 - data[i + 1];
+				data[i + 2] = 255 - data[i + 2];
+			}
+		}
+
+		// Apply dithering if needed
+		if (dithering !== DitheringAlgorithm.NONE) {
+			applyDithering(imageData, dithering, threshold);
+		}
+		
+		ctx.putImageData(imageData, 0, 0);
 	});
+
 	img.addEventListener("error", () => {
-		handleError("failed to load image");
+		handleError("Failed to load image");
 	});
 
 	img.src = url;
@@ -110,6 +369,7 @@ const drawImageToCanvas = (ctx, url, doScale = true) => {
 const updateCanvasImage = (canvas) => {
 	const ctx = canvas.getContext("2d");
 	const file = $("#inputImage").files[0];
+
 	if (!file) {
 		ctx.fillStyle = "#fff";
 		ctx.fillRect(0, 0, canvas.width, canvas.height);
@@ -117,11 +377,27 @@ const updateCanvasImage = (canvas) => {
 	}
 
 	const reader = new FileReader();
+
 	reader.addEventListener("load", (e) => {
-		drawImageToCanvas(ctx, e.target.result);
+		const dithering = $("#ditheringAlgorithm").value;
+		const threshold = parseInt($("#imageThreshold").value) || 128;
+		const invert = $("#imageInvert").checked;
+		const fitToLabel = $("#imageFitToLabel").checked;
+		const brightness = parseInt($("#imageBrightness")?.value) || 0;
+		const contrast = parseInt($("#imageContrast")?.value) || 0;
+
+		drawImageToCanvas(ctx, e.target.result, canvas, {
+			doScale: fitToLabel,
+			dithering,
+			threshold,
+			invert,
+			brightness,
+			contrast,
+		});
 	});
+
 	reader.addEventListener("error", () => {
-		handleError("failed to read image file");
+		handleError("Failed to read image file");
 	});
 
 	reader.readAsDataURL(file);
@@ -129,54 +405,1631 @@ const updateCanvasImage = (canvas) => {
 
 const updateCanvasQR = async (canvas) => {
 	const data = $("#inputQR").value;
+	const errorCorrection = $("#qrErrorCorrection").value;
+	const margin = parseInt($("#qrMargin").value) || 2;
+
+	if (!data) {
+		const ctx = canvas.getContext("2d");
+		ctx.fillStyle = "#fff";
+		ctx.fillRect(0, 0, canvas.width, canvas.height);
+		return;
+	}
+
+	try {
+		const qrSize = Math.min(canvas.width, canvas.height) - 16;
+		const qrImg = await QRCode.toDataURL(data, {
+			width: qrSize,
+			margin: margin,
+			errorCorrectionLevel: errorCorrection,
+		});
+
+		const ctx = canvas.getContext("2d");
+		drawImageToCanvas(ctx, qrImg, canvas, {
+			doScale: false,
+			dithering: DitheringAlgorithm.NONE,
+		});
+	} catch (e) {
+		handleError(`QR Code error: ${e.message}`);
+	}
+};
+
+// ================== Bluetooth Functions ==================
+
+const connectPrinter = async () => {
+	try {
+		const device = await navigator.bluetooth.requestDevice({
+			acceptAllDevices: true,
+			optionalServices: [
+				"0000ff00-0000-1000-8000-00805f9b34fb",
+				"0000af30-0000-1000-8000-00805f9b34fb",
+			],
+		});
+
+		// Detect printer model from name
+		if (device.name) {
+			const detectedModel = detectPrinterModel(device.name);
+			state.printerModel = detectedModel;
+			$("#printerModel").value = detectedModel;
+			updatePrinterSettings(detectedModel);
+		}
+
+		const server = await device.gatt.connect();
+
+		// Try to get the service
+		let service;
+		try {
+			service = await server.getPrimaryService("0000ff00-0000-1000-8000-00805f9b34fb");
+		} catch {
+			service = await server.getPrimaryService("0000af30-0000-1000-8000-00805f9b34fb");
+		}
+
+		const characteristic = await service.getCharacteristic("0000ff02-0000-1000-8000-00805f9b34fb");
+
+		// Try to get notify characteristic for status updates
+		try {
+			const notifyChar = await service.getCharacteristic("0000ff03-0000-1000-8000-00805f9b34fb");
+			await notifyChar.startNotifications();
+			notifyChar.addEventListener("characteristicvaluechanged", handlePrinterNotification);
+			state.notifyCharacteristic = notifyChar;
+		} catch (e) {
+			console.log("Notifications not available:", e);
+		}
+
+		state.device = device;
+		state.characteristic = characteristic;
+
+		// Listen for disconnect
+		device.addEventListener("gattserverdisconnected", () => {
+			updateConnectionStatus(false);
+			state.device = null;
+			state.characteristic = null;
+			showSuccess("Printer disconnected");
+		});
+
+		updateConnectionStatus(true, device.name);
+		showSuccess(`Connected to ${device.name}`);
+
+		return characteristic;
+	} catch (e) {
+		if (e.name !== "NotFoundError") {
+			handleError(e);
+		}
+		return null;
+	}
+};
+
+const disconnectPrinter = () => {
+	if (state.device && state.device.gatt.connected) {
+		state.device.gatt.disconnect();
+	}
+	updateConnectionStatus(false);
+};
+
+const handlePrinterNotification = (event) => {
+	const value = new Uint8Array(event.target.value.buffer);
+	console.log("Printer notification:", value);
+
+	// Parse common notifications based on theacodes/phomemo_m02s
+	if (value.length >= 3) {
+		if (value[0] === 0x1a) {
+			switch (value[1]) {
+				case 0x06:
+					console.log("Paper status:", value[2] === 0x89 ? "Have paper" : "Out of paper");
+					break;
+				case 0x05:
+					console.log("Cover status:", value[2] === 0x98 ? "Closed" : "Open");
+					break;
+				case 0x04:
+					console.log("Print complete");
+					break;
+			}
+		}
+	}
+};
+
+// ================== Print Function ==================
+
+const print = async (canvas) => {
+	const btnPrint = $("#btnPrint");
+	btnPrint.disabled = true;
+	btnPrint.classList.add("printing");
+	btnPrint.innerHTML = '<i class="bi bi-printer"></i> Printing...';
+
+	try {
+		let char = state.characteristic;
+
+		// Connect if not already connected
+		if (!char) {
+			char = await connectPrinter();
+			if (!char) {
+				throw new Error("Failed to connect to printer");
+			}
+		}
+
+		showProgress(true, 0);
+
+		// Get print options
+		const options = {
+			speed: parseInt($("#printSpeed").value) || 5,
+			density: parseInt($("#printDensity").value) || 9,
+			labelType: parseInt($("#labelType").value) || 0x0a,
+			copies: parseInt($("#printCopies").value) || 1,
+			spacing: parseInt($("#labelSpacing").value) || 0,
+		};
+
+		// Print with progress callback
+		await printCanvasAdvanced(char, canvas, state.printerModel, options, (sent, total) => {
+			const progress = (sent / total) * 100;
+			showProgress(true, progress);
+		});
+
+		showProgress(true, 100);
+		showSuccess("Print complete!");
+
+		// Add to print history
+		addToHistory({
+			templateName: state.currentTab,
+			type: state.currentTab,
+			preview: canvas.toDataURL("image/png"),
+			success: true,
+		});
+		updatePrintHistory();
+
+		setTimeout(() => showProgress(false), 1500);
+	} catch (e) {
+		handleError(e);
+		showProgress(false);
+		// Add failed print to history
+		addToHistory({
+			templateName: state.currentTab,
+			type: state.currentTab,
+			preview: canvas.toDataURL("image/png"),
+			success: false,
+		});
+		updatePrintHistory();
+	} finally {
+		btnPrint.disabled = false;
+		btnPrint.classList.remove("printing");
+		btnPrint.innerHTML = '<i class="bi bi-printer"></i> Print Label';
+	}
+};
+
+// ================== Dithering Preview ==================
+
+const showDitheringPreview = () => {
+	const container = $("#ditheringPreviewContainer");
+	container.innerHTML = "";
+
+	const file = $("#inputImage").files[0];
+	if (!file) {
+		handleError("Please select an image first");
+		return;
+	}
+
+	const reader = new FileReader();
+
+	reader.addEventListener("load", (e) => {
+		const img = new Image();
+
+		img.addEventListener("load", () => {
+			Object.keys(DitheringAlgorithm).forEach((key) => {
+				const algo = DitheringAlgorithm[key];
+				const info = DitheringInfo[algo];
+
+				const col = document.createElement("div");
+				col.className = "col-md-4 col-sm-6 dithering-preview";
+
+				const previewCanvas = document.createElement("canvas");
+				previewCanvas.width = 160;
+				previewCanvas.height = 160;
+
+				const ctx = previewCanvas.getContext("2d");
+				ctx.fillStyle = "#fff";
+				ctx.fillRect(0, 0, previewCanvas.width, previewCanvas.height);
+
+				// Draw scaled image
+				const scale = Math.min(previewCanvas.width / img.width, previewCanvas.height / img.height);
+				const w = img.width * scale;
+				const h = img.height * scale;
+				ctx.drawImage(img, (previewCanvas.width - w) / 2, (previewCanvas.height - h) / 2, w, h);
+
+				// Apply dithering
+				const imageData = ctx.getImageData(0, 0, previewCanvas.width, previewCanvas.height);
+				applyDithering(imageData, algo, 128);
+				ctx.putImageData(imageData, 0, 0);
+
+				const label = document.createElement("div");
+				label.className = "preview-label";
+				label.textContent = info?.name || key;
+
+				col.appendChild(previewCanvas);
+				col.appendChild(label);
+				container.appendChild(col);
+			});
+
+			const modal = new bootstrap.Modal($("#ditheringModal"));
+			modal.show();
+		});
+
+		img.src = e.target.result;
+	});
+
+	reader.readAsDataURL(file);
+};
+
+// ================== Download Function ==================
+
+const downloadImage = () => {
+	const canvas = $("#canvas");
+	const link = document.createElement("a");
+	link.download = "label.png";
+	link.href = canvas.toDataURL("image/png");
+	link.click();
+};
+
+// ================== Template Functions ==================
+
+const updateTemplatesList = () => {
+	const container = $("#templatesList");
+	const templates = getTemplates();
+
+	if (templates.length === 0) {
+		container.innerHTML = `
+			<div class="text-muted text-center py-3">
+				<i class="bi bi-inbox fs-1"></i>
+				<p>No saved templates yet</p>
+			</div>
+		`;
+		return;
+	}
+
+	container.innerHTML = templates
+		.map(
+			(t) => `
+		<div class="template-item" data-id="${t.id}">
+			<img src="${t.preview || ""}" alt="${t.name}" class="template-preview" />
+			<div class="template-info">
+				<div class="template-name">${t.name}</div>
+				<div class="template-meta">${t.type} • ${new Date(t.createdAt).toLocaleDateString()}</div>
+			</div>
+			<div class="template-actions">
+				<button type="button" class="btn btn-sm btn-outline-primary btn-load-template" title="Load">
+					<i class="bi bi-box-arrow-in-down"></i>
+				</button>
+				<button type="button" class="btn btn-sm btn-outline-danger btn-delete-template" title="Delete">
+					<i class="bi bi-trash"></i>
+				</button>
+			</div>
+		</div>
+	`
+		)
+		.join("");
+
+	// Add event listeners
+	container.querySelectorAll(".btn-load-template").forEach((btn) => {
+		btn.addEventListener("click", (e) => {
+			const id = e.target.closest(".template-item").dataset.id;
+			loadTemplate(id);
+		});
+	});
+
+	container.querySelectorAll(".btn-delete-template").forEach((btn) => {
+		btn.addEventListener("click", (e) => {
+			const id = e.target.closest(".template-item").dataset.id;
+			if (confirm("Delete this template?")) {
+				deleteTemplate(id);
+				updateTemplatesList();
+				showSuccess("Template deleted");
+			}
+		});
+	});
+};
+
+const saveCurrentAsTemplate = () => {
+	const canvas = $("#canvas");
+	const name = $("#templateName").value.trim();
+
+	if (!name) {
+		handleError("Please enter a template name");
+		return;
+	}
+
+	const template = {
+		name,
+		type: state.currentTab,
+		preview: canvas.toDataURL("image/png"),
+		labelSize: { ...state.labelSize },
+		content: getCurrentContent(),
+		settings: {
+			printerModel: state.printerModel,
+			density: parseInt($("#printDensity").value) || 9,
+			speed: parseInt($("#printSpeed").value) || 5,
+		},
+	};
+
+	saveTemplate(template);
+	updateTemplatesList();
+	showSuccess("Template saved!");
+
+	// Close modal
+	bootstrap.Modal.getInstance($("#saveTemplateModal"))?.hide();
+};
+
+const getCurrentContent = () => {
+	switch (state.currentTab) {
+		case "text":
+			return {
+				text: $("#inputText").value,
+				fontSize: parseInt($("#inputFontSize").value),
+				fontFamily: $("#fontFamily").value,
+				fontWeight: $("#fontWeight").value,
+				textAlign: $("#textAlign").value,
+			};
+		case "barcode":
+			return {
+				data: $("#inputBarcode").value,
+				format: $("#barcodeFormat").value,
+				width: parseInt($("#barcodeWidth").value),
+				showText: $("#barcodeShowText").checked,
+			};
+		case "qr":
+			return {
+				data: $("#inputQR").value,
+				errorCorrection: $("#qrErrorCorrection").value,
+				margin: parseInt($("#qrMargin").value),
+			};
+		default:
+			return {};
+	}
+};
+
+const loadTemplate = (id) => {
+	const template = getTemplateById(id);
+	if (!template) {
+		handleError("Template not found");
+		return;
+	}
+
+	// Set label size
+	$("#inputWidth").value = template.labelSize.width;
+	$("#inputHeight").value = template.labelSize.height;
+	updateLabelSize($("#canvas"));
+
+	// Set content based on type
+	if (template.type === "text" && template.content) {
+		$("#inputText").value = template.content.text || "";
+		$("#inputFontSize").value = template.content.fontSize || 48;
+		$("#fontFamily").value = template.content.fontFamily || "sans-serif";
+		$("#fontWeight").value = template.content.fontWeight || "normal";
+		$("#textAlign").value = template.content.textAlign || "center";
+
+		// Switch to text tab
+		document.querySelector("#nav-text-tab").click();
+	} else if (template.type === "barcode" && template.content) {
+		$("#inputBarcode").value = template.content.data || "";
+		$("#barcodeFormat").value = template.content.format || "CODE128";
+		$("#barcodeWidth").value = template.content.width || 2;
+		$("#barcodeShowText").checked = template.content.showText !== false;
+
+		document.querySelector("#nav-barcode-tab").click();
+	} else if (template.type === "qr" && template.content) {
+		$("#inputQR").value = template.content.data || "";
+		$("#qrErrorCorrection").value = template.content.errorCorrection || "M";
+		$("#qrMargin").value = template.content.margin || 2;
+
+		document.querySelector("#nav-qr-tab").click();
+	}
+
+	showSuccess(`Loaded template: ${template.name}`);
+};
+
+// ================== Print History Functions ==================
+
+const updatePrintHistory = () => {
+	const container = $("#printHistoryList");
+	const history = getPrintHistory(10);
+
+	if (history.length === 0) {
+		container.innerHTML = '<div class="text-muted text-center py-2">No print history yet</div>';
+		return;
+	}
+
+	container.innerHTML = history
+		.map(
+			(h) => `
+		<div class="history-item">
+			<span class="history-icon">
+				<i class="bi ${h.success ? "bi-check-circle text-success" : "bi-x-circle text-danger"}"></i>
+			</span>
+			<div class="history-info">
+				${h.type} label
+				<div class="history-time">${new Date(h.timestamp).toLocaleString()}</div>
+			</div>
+		</div>
+	`
+		)
+		.join("");
+};
+
+// ================== Printer Status Functions ==================
+
+const updateStatusDisplay = () => {
+	const status = printerStatus.getStatus();
+
+	// Battery
+	if (status.battery !== null) {
+		$("#batteryLevel").textContent = `${status.battery}%`;
+		$("#batteryIcon").className = `bi ${printerStatus.getBatteryIcon()} fs-4`;
+	}
+
+	// Paper
+	if (status.hasPaper !== null) {
+		$("#paperStatus").textContent = status.hasPaper ? "OK" : "Empty";
+		$("#paperIcon").className = `bi bi-file-earmark fs-4 ${status.hasPaper ? "text-success" : "text-danger"}`;
+	}
+
+	// Cover
+	if (status.coverClosed !== null) {
+		$("#coverStatus").textContent = status.coverClosed ? "Closed" : "Open";
+		$("#coverIcon").className = `bi bi-box fs-4 ${status.coverClosed ? "text-success" : "text-warning"}`;
+	}
+
+	// Ready status
+	$("#printerReadyStatus").textContent = printerStatus.getStatusMessage();
+	$("#readyIcon").className = `bi fs-4 ${
+		printerStatus.isReady() ? "bi-check-circle text-success" : "bi-exclamation-circle text-warning"
+	}`;
+};
+
+// ================== Keyboard Shortcuts ==================
+
+const setupKeyboardShortcuts = () => {
+	document.addEventListener("keydown", (e) => {
+		// Ctrl+P - Print
+		if (e.ctrlKey && e.key === "p") {
+			e.preventDefault();
+			$("#btnPrint").click();
+		}
+
+		// Ctrl+S - Save template
+		if (e.ctrlKey && e.key === "s") {
+			e.preventDefault();
+			$("#btnSaveTemplate").click();
+		}
+
+		// Ctrl+Z - Undo (in draw mode)
+		if (e.ctrlKey && e.key === "z" && state.currentTab === "draw" && state.canvasEditor) {
+			e.preventDefault();
+			state.canvasEditor.undo();
+		}
+
+		// Ctrl+Y - Redo (in draw mode)
+		if (e.ctrlKey && e.key === "y" && state.currentTab === "draw" && state.canvasEditor) {
+			e.preventDefault();
+			state.canvasEditor.redo();
+		}
+	});
+};
+
+// ================== Batch Print Functions ==================
+
+const batchPrint = async (canvas) => {
+	const textInput = $("#batchTextInput").value.trim();
+	if (!textInput) {
+		handleError("Please enter some text items to print");
+		return;
+	}
+
+	const items = textInput.split("\n").filter(line => line.trim());
+	const copiesEach = parseInt($("#batchCopiesEach").value) || 1;
+	const delay = parseInt($("#batchDelay").value) || 500;
+	const totalLabels = items.length * copiesEach;
+
+	const progressDiv = $("#batchProgress");
+	const progressBar = $("#batchProgressBar");
+	const statusDiv = $("#batchStatus");
+	const statusText = $("#batchStatusText");
+	const btnStart = $("#btnStartBatchPrint");
+
+	btnStart.disabled = true;
+	progressDiv.style.display = "flex";
+	statusDiv.style.display = "block";
+
+	try {
+		let char = state.characteristic;
+		if (!char) {
+			char = await connectPrinter();
+			if (!char) throw new Error("Failed to connect to printer");
+		}
+
+		let printed = 0;
+		for (let i = 0; i < items.length; i++) {
+			const item = items[i].trim();
+			
+			// Update text and redraw canvas
+			$("#inputText").value = item;
+			updateCanvasText(canvas);
+			
+			// Wait for canvas to update
+			await new Promise(resolve => setTimeout(resolve, 100));
+
+			for (let c = 0; c < copiesEach; c++) {
+				statusText.textContent = `Printing: "${item}" (${printed + 1}/${totalLabels})`;
+				
+				const options = {
+					speed: parseInt($("#printSpeed").value) || 5,
+					density: parseInt($("#printDensity").value) || 9,
+					labelType: parseInt($("#labelType").value) || 0x0a,
+					copies: 1,
+					spacing: parseInt($("#labelSpacing").value) || 0,
+				};
+
+				await printCanvasAdvanced(char, canvas, state.printerModel, options);
+				
+				printed++;
+				const progress = (printed / totalLabels) * 100;
+				progressBar.style.width = `${progress}%`;
+				progressBar.textContent = `${Math.round(progress)}%`;
+
+				// Delay between prints
+				if (printed < totalLabels) {
+					await new Promise(resolve => setTimeout(resolve, delay));
+				}
+			}
+		}
+
+		statusText.textContent = `Complete! Printed ${totalLabels} labels.`;
+		showSuccess(`Batch print complete: ${totalLabels} labels printed`);
+
+	} catch (e) {
+		handleError(e);
+		statusText.textContent = `Error: ${e.message}`;
+	} finally {
+		btnStart.disabled = false;
+	}
+};
+
+const updateBatchCount = () => {
+	const textInput = $("#batchTextInput")?.value?.trim() || "";
+	const items = textInput.split("\n").filter(line => line.trim()).length;
+	const copiesEach = parseInt($("#batchCopiesEach")?.value) || 1;
+	const total = items * copiesEach;
+	const countEl = $("#batchTotalCount");
+	if (countEl) countEl.textContent = total;
+};
+
+// ================== Quick Text Presets ==================
+
+const textPresets = {
+	name: { text: "Your Name Here", fontSize: 36, fontWeight: "bold" },
+	price: { text: "$0.00", fontSize: 48, fontWeight: "bold" },
+	warning: { text: "⚠️ WARNING", fontSize: 32, fontWeight: "bold" },
+	fragile: { text: "📦 FRAGILE\nHandle with care", fontSize: 24, fontWeight: "bold" },
+};
+
+const applyTextPreset = (presetName) => {
+	const preset = textPresets[presetName];
+	if (!preset) return;
+
+	$("#inputText").value = preset.text;
+	if (preset.fontSize) $("#inputFontSize").value = preset.fontSize;
+	if (preset.fontWeight) $("#fontWeight").value = preset.fontWeight;
+	
+	updateCanvasText($("#canvas"));
+};
+
+// ================== Emoji Picker ==================
+
+const commonEmojis = [
+	"😀", "😃", "😄", "😁", "😊", "🥰", "😍", "🤩",
+	"😎", "🤔", "🙄", "😤", "😭", "🥺", "😱", "🤯",
+	"⚠️", "✓", "✗", "★", "♥", "💯", "🔥", "💰",
+	"📦", "🎁", "📍", "🏠", "🚗", "✈️", "🎉", "🎂",
+	"☀️", "🌙", "⭐", "🌈", "❄️", "💧", "🌸", "🍎",
+	"🍕", "🍔", "☕", "🍷", "🎵", "📱", "💻", "📷",
+	"👍", "👎", "👋", "🙏", "💪", "🎯", "🏆", "🎨"
+];
+
+const initEmojiPicker = () => {
+	const grid = $("#emojiGrid");
+	if (!grid) return;
+
+	grid.innerHTML = commonEmojis.map(emoji => 
+		`<span class="emoji-btn" data-emoji="${emoji}">${emoji}</span>`
+	).join("");
+
+	grid.querySelectorAll(".emoji-btn").forEach(btn => {
+		btn.addEventListener("click", () => {
+			const emoji = btn.dataset.emoji;
+			insertEmoji(emoji);
+			bootstrap.Modal.getInstance($("#emojiPickerModal"))?.hide();
+		});
+	});
+};
+
+const insertEmoji = (emoji) => {
+	const textarea = $("#inputText");
+	if (!textarea) return;
+
+	const start = textarea.selectionStart;
+	const end = textarea.selectionEnd;
+	const text = textarea.value;
+	
+	textarea.value = text.substring(0, start) + emoji + text.substring(end);
+	textarea.selectionStart = textarea.selectionEnd = start + emoji.length;
+	textarea.focus();
+	
+	updateCanvasText($("#canvas"));
+};
+
+// ================== Image Manipulation Functions ==================
+
+const rotateCanvasImage = (canvas, degrees) => {
 	const ctx = canvas.getContext("2d");
-	const qrImg = await QRCode.toDataURL(data, { width: canvas.width - 8, margin: 2 });
-	drawImageToCanvas(ctx, qrImg, false);
+	const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+	
+	const tempCanvas = document.createElement("canvas");
+	tempCanvas.width = canvas.width;
+	tempCanvas.height = canvas.height;
+	const tempCtx = tempCanvas.getContext("2d");
+	tempCtx.putImageData(imageData, 0, 0);
+	
+	ctx.fillStyle = "#fff";
+	ctx.fillRect(0, 0, canvas.width, canvas.height);
+	
+	ctx.save();
+	ctx.translate(canvas.width / 2, canvas.height / 2);
+	ctx.rotate((degrees * Math.PI) / 180);
+	ctx.drawImage(tempCanvas, -canvas.width / 2, -canvas.height / 2);
+	ctx.restore();
 };
 
-const handleError = (err) => {
-	console.error(err);
-
-	const toast = bootstrap.Toast.getOrCreateInstance($("#errorToast"));
-	$("#errorText").textContent = err.toString();
-	toast.show();
+const flipCanvasImage = (canvas, direction) => {
+	const ctx = canvas.getContext("2d");
+	const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+	
+	const tempCanvas = document.createElement("canvas");
+	tempCanvas.width = canvas.width;
+	tempCanvas.height = canvas.height;
+	const tempCtx = tempCanvas.getContext("2d");
+	tempCtx.putImageData(imageData, 0, 0);
+	
+	ctx.fillStyle = "#fff";
+	ctx.fillRect(0, 0, canvas.width, canvas.height);
+	
+	ctx.save();
+	if (direction === "horizontal") {
+		ctx.translate(canvas.width, 0);
+		ctx.scale(-1, 1);
+	} else {
+		ctx.translate(0, canvas.height);
+		ctx.scale(1, -1);
+	}
+	ctx.drawImage(tempCanvas, 0, 0);
+	ctx.restore();
 };
+
+// ================== Event Handlers ==================
 
 document.addEventListener("DOMContentLoaded", function () {
-	const canvas = document.querySelector("#canvas");
+	const canvas = $("#canvas");
 
+	// Tab change events
 	document.addEventListener("shown.bs.tab", (e) => {
+		state.currentTab = e.target.id.replace("nav-", "").replace("-tab", "");
+		
 		if (e.target.id === "nav-text-tab") updateCanvasText(canvas);
 		else if (e.target.id === "nav-barcode-tab") updateCanvasBarcode(canvas);
 		else if (e.target.id === "nav-image-tab") updateCanvasImage(canvas);
 		else if (e.target.id === "nav-qr-tab") updateCanvasQR(canvas);
+		else if (e.target.id === "nav-draw-tab") {
+			// Initialize canvas editor if not already done
+			if (!state.canvasEditor) {
+				state.canvasEditor = new CanvasEditor(canvas);
+			}
+		} else if (e.target.id === "nav-templates-tab") {
+			updateTemplatesList();
+		}
 	});
 
+	// Label size inputs
 	$all("#inputWidth, #inputHeight").forEach((e) =>
 		e.addEventListener("input", () => updateLabelSize(canvas))
 	);
-	updateLabelSize(canvas);
 
-	$all("#inputText, #inputFontSize").forEach((e) =>
+	// Label preset
+	$("#labelPreset").addEventListener("change", (e) => {
+		const value = e.target.value;
+		if (value === "custom") return;
+
+		if (value === "fruit") {
+			$("#inputWidth").value = 40;
+			$("#inputHeight").value = 10;
+		} else {
+			const [width, height] = value.split("x").map(Number);
+			$("#inputWidth").value = width;
+			$("#inputHeight").value = height;
+		}
+		updateLabelSize(canvas);
+	});
+
+	// Text inputs
+	$all("#inputText, #inputFontSize, #textAlign, #fontFamily, #fontWeight").forEach((e) =>
 		e.addEventListener("input", () => updateCanvasText(canvas))
 	);
-	updateCanvasText(canvas);
 
-	$("#inputBarcode").addEventListener("input", () => updateCanvasBarcode(canvas));
-	$("#inputImage").addEventListener("change", () => updateCanvasImage(canvas));
-	$("#inputQR").addEventListener("input", () => updateCanvasQR(canvas));
-
-	$("form").addEventListener("submit", (e) => {
-		e.preventDefault();
-		navigator.bluetooth
-			.requestDevice({
-				acceptAllDevices: true,
-				optionalServices: ["0000ff00-0000-1000-8000-00805f9b34fb"],
-			})
-			.then((device) => device.gatt.connect())
-			.then((server) => server.getPrimaryService("0000ff00-0000-1000-8000-00805f9b34fb"))
-			.then((service) => service.getCharacteristic("0000ff02-0000-1000-8000-00805f9b34fb"))
-			.then((char) => printCanvas(char, canvas))
-			.catch(handleError);
+	// Text effect inputs
+	$all("#textColor, #textBgColor, #textBgTransparent, #textOutline, #textShadow").forEach((el) => {
+		if (el) el.addEventListener("change", () => updateCanvasText(canvas));
 	});
+
+	// Quick Text Presets
+	$all(".quick-text-preset").forEach((btn) => {
+		btn.addEventListener("click", () => {
+			const preset = btn.dataset.preset;
+			applyTextPreset(preset);
+		});
+	});
+
+	// Quick Emoji Bar
+	$all("#quickEmojiBar .emoji-btn").forEach((btn) => {
+		btn.addEventListener("click", () => {
+			insertEmoji(btn.dataset.emoji);
+		});
+	});
+
+	// Emoji Picker Button
+	$("#btnEmojiPicker")?.addEventListener("click", () => {
+		const modal = new bootstrap.Modal($("#emojiPickerModal"));
+		modal.show();
+	});
+
+	// Barcode inputs
+	$all("#inputBarcode, #barcodeFormat, #barcodeWidth, #barcodeShowText").forEach((e) =>
+		e.addEventListener("input", () => updateCanvasBarcode(canvas))
+	);
+	$("#barcodeShowText").addEventListener("change", () => updateCanvasBarcode(canvas));
+
+	// Image inputs
+	$("#inputImage").addEventListener("change", () => updateCanvasImage(canvas));
+	$all("#ditheringAlgorithm, #imageThreshold, #imageInvert, #imageFitToLabel").forEach((e) =>
+		e.addEventListener("change", () => updateCanvasImage(canvas))
+	);
+
+	// Image brightness/contrast - use explicit mapping for value display elements
+	const imageAdjustmentMap = {
+		imageBrightness: "brightnessValue",
+		imageContrast: "contrastValue",
+	};
+
+	$all("#imageBrightness, #imageContrast").forEach((el) => {
+		if (el) {
+			el.addEventListener("input", (e) => {
+				const valueElId = imageAdjustmentMap[e.target.id];
+				const valueEl = valueElId ? $(`#${valueElId}`) : null;
+				if (valueEl) valueEl.textContent = e.target.value;
+				updateCanvasImage(canvas);
+			});
+		}
+	});
+
+	// Image rotation buttons
+	$("#btnRotateLeft")?.addEventListener("click", () => {
+		// Store current image and rotate
+		rotateCanvasImage(canvas, -90);
+	});
+	$("#btnRotateRight")?.addEventListener("click", () => {
+		rotateCanvasImage(canvas, 90);
+	});
+	$("#btnRotate180")?.addEventListener("click", () => {
+		rotateCanvasImage(canvas, 180);
+	});
+	$("#btnFlipH")?.addEventListener("click", () => {
+		flipCanvasImage(canvas, "horizontal");
+	});
+	$("#btnFlipV")?.addEventListener("click", () => {
+		flipCanvasImage(canvas, "vertical");
+	});
+	$("#btnResetImage")?.addEventListener("click", () => {
+		$("#imageBrightness").value = 0;
+		$("#imageContrast").value = 0;
+		$("#brightnessValue").textContent = "0";
+		$("#contrastValue").textContent = "0";
+		updateCanvasImage(canvas);
+	});
+
+	// Threshold value display
+	$("#imageThreshold").addEventListener("input", (e) => {
+		$("#thresholdValue").textContent = e.target.value;
+		updateCanvasImage(canvas);
+	});
+
+	// QR inputs
+	$all("#inputQR, #qrErrorCorrection, #qrMargin").forEach((e) =>
+		e.addEventListener("input", () => updateCanvasQR(canvas))
+	);
+
+	// Printer model change
+	$("#printerModel").addEventListener("change", (e) => {
+		updatePrinterSettings(e.target.value);
+		updateLabelSize(canvas);
+	});
+
+	// Connect button
+	$("#btnConnect").addEventListener("click", () => {
+		if (state.connected) {
+			disconnectPrinter();
+		} else {
+			connectPrinter();
+		}
+	});
+
+	// Print form submit
+	$("#printForm").addEventListener("submit", (e) => {
+		e.preventDefault();
+		print(canvas);
+	});
+
+	// Download button
+	$("#btnDownload").addEventListener("click", downloadImage);
+
+	// Dithering preview button
+	$("#btnPreviewDithering").addEventListener("click", showDitheringPreview);
+
+	// ================== Batch Print ==================
+
+	$("#btnBatchPrint")?.addEventListener("click", () => {
+		const modal = new bootstrap.Modal($("#batchPrintModal"));
+		modal.show();
+	});
+
+	$("#batchTextInput")?.addEventListener("input", updateBatchCount);
+	$("#batchCopiesEach")?.addEventListener("input", updateBatchCount);
+
+	$("#btnStartBatchPrint")?.addEventListener("click", () => {
+		batchPrint(canvas);
+	});
+
+	// ================== Quick Print Buttons ==================
+
+	$("#btnPrint1x")?.addEventListener("click", () => {
+		$("#printCopies").value = 1;
+		print(canvas);
+	});
+	$("#btnPrint3x")?.addEventListener("click", () => {
+		$("#printCopies").value = 3;
+		print(canvas);
+	});
+	$("#btnPrint5x")?.addEventListener("click", () => {
+		$("#printCopies").value = 5;
+		print(canvas);
+	});
+	$("#btnPrint10x")?.addEventListener("click", () => {
+		$("#printCopies").value = 10;
+		print(canvas);
+	});
+
+	// ================== Canvas Zoom ==================
+
+	const container = $("#canvasContainer");
+
+	$("#btnZoomIn")?.addEventListener("click", () => {
+		state.zoomLevel = Math.min(state.zoomLevel + 0.25, 2);
+		container.style.transform = `scale(${state.zoomLevel})`;
+	});
+
+	$("#btnZoomOut")?.addEventListener("click", () => {
+		state.zoomLevel = Math.max(state.zoomLevel - 0.25, 0.5);
+		container.style.transform = `scale(${state.zoomLevel})`;
+	});
+
+	// ================== Drawing Tools ==================
+	
+	// Tool buttons
+	const toolButtons = {
+		toolPen: "pen",
+		toolEraser: "eraser",
+		toolLine: "line",
+		toolRect: "rectangle",
+		toolCircle: "circle",
+	};
+
+	Object.keys(toolButtons).forEach((btnId) => {
+		const btn = $(`#${btnId}`);
+		if (btn) {
+			btn.addEventListener("click", () => {
+				// Remove active from all tool buttons
+				Object.keys(toolButtons).forEach((id) => $(`#${id}`)?.classList.remove("active"));
+				btn.classList.add("active");
+				if (state.canvasEditor) {
+					state.canvasEditor.setTool(toolButtons[btnId]);
+				}
+			});
+		}
+	});
+
+	// Undo/Redo
+	$("#btnUndo")?.addEventListener("click", () => state.canvasEditor?.undo());
+	$("#btnRedo")?.addEventListener("click", () => state.canvasEditor?.redo());
+
+	// Clear canvas
+	$("#btnClearCanvas")?.addEventListener("click", () => {
+		if (state.canvasEditor) {
+			state.canvasEditor.clear();
+		}
+	});
+
+	// Invert canvas
+	$("#btnInvertCanvas")?.addEventListener("click", () => {
+		if (state.canvasEditor) {
+			state.canvasEditor.invert();
+		}
+	});
+
+	// Drawing color
+	$("#drawColor")?.addEventListener("input", (e) => {
+		if (state.canvasEditor) {
+			state.canvasEditor.setColor(e.target.value);
+		}
+	});
+
+	// Drawing line width
+	$("#drawLineWidth")?.addEventListener("input", (e) => {
+		if (state.canvasEditor) {
+			state.canvasEditor.setLineWidth(parseInt(e.target.value));
+		}
+	});
+
+	// ================== Template Management ==================
+
+	// Save template button
+	$("#btnSaveTemplate")?.addEventListener("click", () => {
+		// Copy canvas to template preview
+		const templatePreview = $("#templatePreview");
+		if (templatePreview) {
+			templatePreview.width = canvas.width;
+			templatePreview.height = canvas.height;
+			const ctx = templatePreview.getContext("2d");
+			ctx.drawImage(canvas, 0, 0);
+		}
+		$("#templateName").value = "";
+		const modal = new bootstrap.Modal($("#saveTemplateModal"));
+		modal.show();
+	});
+
+	// Confirm save template
+	$("#btnConfirmSaveTemplate")?.addEventListener("click", saveCurrentAsTemplate);
+
+	// Export templates
+	$("#btnExportTemplates")?.addEventListener("click", () => {
+		const data = exportTemplates();
+		const blob = new Blob([data], { type: "application/json" });
+		const url = URL.createObjectURL(blob);
+		const link = document.createElement("a");
+		link.href = url;
+		link.download = "phomemo-templates.json";
+		link.click();
+		URL.revokeObjectURL(url);
+		showSuccess("Templates exported!");
+	});
+
+	// Import templates
+	$("#btnImportTemplates")?.addEventListener("click", () => {
+		$("#importTemplateFile").click();
+	});
+
+	$("#importTemplateFile")?.addEventListener("change", (e) => {
+		const file = e.target.files[0];
+		if (!file) return;
+
+		const reader = new FileReader();
+		reader.onload = (event) => {
+			try {
+				const count = importTemplates(event.target.result, true);
+				updateTemplatesList();
+				showSuccess(`Imported ${count} template(s)!`);
+			} catch (err) {
+				handleError("Failed to import templates: " + err.message);
+			}
+		};
+		reader.readAsText(file);
+		e.target.value = ""; // Reset file input
+	});
+
+	// ================== Print History ==================
+
+	// Clear history button
+	$("#btnClearHistory")?.addEventListener("click", () => {
+		if (confirm("Clear all print history?")) {
+			clearHistory();
+			updatePrintHistory();
+			showSuccess("Print history cleared");
+		}
+	});
+
+	// ================== Printer Status ==================
+
+	// Refresh status button
+	$("#btnRefreshStatus")?.addEventListener("click", async () => {
+		if (state.connected) {
+			await printerStatus.queryAllStatus();
+			updateStatusDisplay();
+		}
+	});
+
+	// Status event listeners
+	printerStatus.on(StatusEventType.BATTERY, updateStatusDisplay);
+	printerStatus.on(StatusEventType.PAPER, updateStatusDisplay);
+	printerStatus.on(StatusEventType.COVER, updateStatusDisplay);
+
+	// ================== Voice Control ==================
+
+	const updateVoiceUI = (listening) => {
+		const btn = $("#btnVoice");
+		const status = $("#voiceStatus");
+		
+		if (listening) {
+			btn.classList.add("listening");
+			btn.innerHTML = '<i class="bi bi-mic-fill"></i>';
+			status.style.display = "flex";
+		} else {
+			btn.classList.remove("listening");
+			btn.innerHTML = '<i class="bi bi-mic"></i>';
+			status.style.display = "none";
+			$("#voiceTranscript").textContent = "";
+		}
+		state.voiceActive = listening;
+	};
+
+	// Voice control callbacks
+	voiceControl.on("onStatusChange", updateVoiceUI);
+	
+	voiceControl.on("onResult", (transcript, isFinal) => {
+		$("#voiceTranscript").textContent = `"${transcript}"`;
+		if (!isFinal) {
+			$("#voiceStatusText").textContent = "Listening...";
+		}
+	});
+
+	voiceControl.on("onCommand", (action, transcript) => {
+		console.log("Voice command:", action, transcript);
+		$("#voiceStatusText").textContent = `Command: ${action}`;
+		
+		const feedbackEnabled = $("#voiceFeedbackEnabled")?.checked ?? true;
+		
+		switch (action) {
+			case "print":
+				print(canvas);
+				if (feedbackEnabled) voiceFeedback.speak("Printing label");
+				break;
+			case "print1":
+				$("#printCopies").value = 1;
+				print(canvas);
+				break;
+			case "print3":
+				$("#printCopies").value = 3;
+				print(canvas);
+				break;
+			case "print5":
+				$("#printCopies").value = 5;
+				print(canvas);
+				break;
+			case "print10":
+				$("#printCopies").value = 10;
+				print(canvas);
+				break;
+			case "tab:text":
+				document.querySelector("#nav-text-tab").click();
+				break;
+			case "tab:barcode":
+				document.querySelector("#nav-barcode-tab").click();
+				break;
+			case "tab:image":
+				document.querySelector("#nav-image-tab").click();
+				break;
+			case "tab:qr":
+				document.querySelector("#nav-qr-tab").click();
+				break;
+			case "tab:draw":
+				document.querySelector("#nav-draw-tab").click();
+				break;
+			case "tab:templates":
+				document.querySelector("#nav-templates-tab").click();
+				break;
+			case "connect":
+				connectPrinter();
+				break;
+			case "disconnect":
+				disconnectPrinter();
+				break;
+			case "clear":
+				$("#inputText").value = "";
+				updateCanvasText(canvas);
+				break;
+			case "undo":
+				state.canvasEditor?.undo();
+				break;
+			case "redo":
+				state.canvasEditor?.redo();
+				break;
+			case "saveTemplate":
+				$("#btnSaveTemplate").click();
+				break;
+			case "download":
+				downloadImage();
+				break;
+			case "fontBigger":
+				$("#inputFontSize").value = Math.min(parseInt($("#inputFontSize").value) + 8, 200);
+				updateCanvasText(canvas);
+				break;
+			case "fontSmaller":
+				$("#inputFontSize").value = Math.max(parseInt($("#inputFontSize").value) - 8, 8);
+				updateCanvasText(canvas);
+				break;
+			case "preset:name":
+				applyTextPreset("name");
+				break;
+			case "preset:price":
+				applyTextPreset("price");
+				break;
+			case "preset:warning":
+				applyTextPreset("warning");
+				break;
+			case "preset:fragile":
+				applyTextPreset("fragile");
+				break;
+			case "setText":
+				$("#inputText").value = transcript;
+				updateCanvasText(canvas);
+				break;
+			case "appendText":
+				$("#inputText").value += ($("#inputText").value ? " " : "") + transcript;
+				updateCanvasText(canvas);
+				break;
+			case "stop":
+				voiceControl.stop();
+				break;
+		}
+		
+		// Restart listening for continuous mode
+		setTimeout(() => {
+			if (state.voiceActive && action !== "stop") {
+				voiceControl.start();
+			}
+		}, 500);
+	});
+
+	voiceControl.on("onError", (error) => {
+		console.error("Voice error:", error);
+		if (error !== "no-speech") {
+			handleError(`Voice: ${error}`);
+		}
+		updateVoiceUI(false);
+	});
+
+	// Voice button
+	$("#btnVoice")?.addEventListener("click", () => {
+		if (state.voiceActive) {
+			voiceControl.stop();
+		} else {
+			if (voiceControl.isSupported()) {
+				voiceControl.start();
+			} else {
+				// Show help modal if not supported
+				const modal = new bootstrap.Modal($("#voiceCommandsModal"));
+				modal.show();
+			}
+		}
+	});
+
+	// Long press to show commands
+	let voicePressTimer;
+	$("#btnVoice")?.addEventListener("mousedown", () => {
+		voicePressTimer = setTimeout(() => {
+			const modal = new bootstrap.Modal($("#voiceCommandsModal"));
+			modal.show();
+		}, 500);
+	});
+	$("#btnVoice")?.addEventListener("mouseup", () => clearTimeout(voicePressTimer));
+	$("#btnVoice")?.addEventListener("mouseleave", () => clearTimeout(voicePressTimer));
+
+	// Start voice from modal
+	$("#btnStartVoiceFromModal")?.addEventListener("click", () => {
+		bootstrap.Modal.getInstance($("#voiceCommandsModal"))?.hide();
+		setTimeout(() => voiceControl.start(), 300);
+	});
+
+	// ================== Camera Scanner ==================
+
+	$("#btnStartCamera")?.addEventListener("click", async () => {
+		const video = $("#cameraVideo");
+		const container = $("#cameraPreviewContainer");
+		
+		const success = await cameraScanner.startCamera(video);
+		if (success) {
+			container.style.display = "block";
+			$("#btnStartCamera").disabled = true;
+			$("#btnStopCamera").disabled = false;
+			$("#btnCapture").disabled = false;
+			$("#btnScanBarcode").disabled = false;
+			$("#btnScanOCR").disabled = false;
+		}
+	});
+
+	$("#btnStopCamera")?.addEventListener("click", () => {
+		cameraScanner.stopCamera();
+		$("#cameraPreviewContainer").style.display = "none";
+		$("#btnStartCamera").disabled = false;
+		$("#btnStopCamera").disabled = true;
+		$("#btnCapture").disabled = true;
+		$("#btnScanBarcode").disabled = true;
+		$("#btnScanOCR").disabled = true;
+	});
+
+	$("#btnCapture")?.addEventListener("click", () => {
+		const frame = cameraScanner.captureFrame();
+		if (frame) {
+			// Set as image input
+			fetch(frame)
+				.then(res => res.blob())
+				.then(blob => {
+					const file = new File([blob], "capture.png", { type: "image/png" });
+					const dt = new DataTransfer();
+					dt.items.add(file);
+					$("#inputImage").files = dt.files;
+					updateCanvasImage(canvas);
+					document.querySelector("#nav-image-tab").click();
+					showSuccess("Image captured!");
+				});
+		}
+	});
+
+	$("#btnScanBarcode")?.addEventListener("click", async () => {
+		const result = await cameraScanner.scanBarcode();
+		if (result) {
+			$("#scanResult").style.display = "block";
+			$("#scanResultText").textContent = `${result.format}: ${result.value}`;
+			
+			// Auto-fill barcode input
+			$("#inputBarcode").value = result.value;
+			document.querySelector("#nav-barcode-tab").click();
+			updateCanvasBarcode(canvas);
+			showSuccess(`Barcode scanned: ${result.value}`);
+		} else {
+			handleError("No barcode detected. Try adjusting the camera.");
+		}
+	});
+
+	$("#btnScanOCR")?.addEventListener("click", async () => {
+		try {
+			$("#scanResultText").textContent = "Scanning text...";
+			$("#scanResult").style.display = "block";
+			
+			const frame = cameraScanner.captureFrame();
+			if (!frame) throw new Error("Failed to capture frame");
+			
+			const result = await ocrScanner.recognize(frame);
+			
+			if (result.text) {
+				$("#scanResultText").textContent = result.text;
+				$("#inputText").value = result.text;
+				document.querySelector("#nav-text-tab").click();
+				updateCanvasText(canvas);
+				showSuccess("Text recognized!");
+			} else {
+				$("#scanResultText").textContent = "No text detected";
+			}
+		} catch (e) {
+			handleError(`OCR Error: ${e.message}`);
+		}
+	});
+
+	// ================== CSV Import ==================
+
+	$("#csvFileInput")?.addEventListener("change", (e) => {
+		const file = e.target.files[0];
+		if (!file) return;
+
+		const reader = new FileReader();
+		reader.onload = (event) => {
+			try {
+				const hasHeader = $("#csvHasHeader").checked;
+				state.csvData = CSVParser.parse(event.target.result, hasHeader);
+				
+				// Populate column selector
+				const select = $("#csvColumn");
+				select.innerHTML = "";
+				
+				if (hasHeader && state.csvData.headers.length > 0) {
+					state.csvData.headers.forEach((header, i) => {
+						const option = document.createElement("option");
+						option.value = i;
+						option.textContent = header;
+						select.appendChild(option);
+					});
+				} else {
+					state.csvData.rows[0]?.forEach((_, i) => {
+						const option = document.createElement("option");
+						option.value = i;
+						option.textContent = `Column ${i + 1}`;
+						select.appendChild(option);
+					});
+				}
+				
+				$("#csvColumnSelect").style.display = "block";
+				$("#btnImportCSV").disabled = false;
+				$("#btnPreviewCSV").disabled = false;
+				
+				showSuccess(`Loaded ${state.csvData.rows.length} rows`);
+			} catch (err) {
+				handleError("Failed to parse CSV: " + err.message);
+			}
+		};
+		reader.readAsText(file);
+	});
+
+	$("#btnPreviewCSV")?.addEventListener("click", () => {
+		if (!state.csvData) return;
+		
+		const colIndex = parseInt($("#csvColumn").value);
+		const preview = state.csvData.rows.slice(0, 5).map(row => row[colIndex] || "").filter(Boolean);
+		
+		const list = $("#csvPreviewList");
+		list.innerHTML = preview.map(item => `<li>${item}</li>`).join("");
+		if (state.csvData.rows.length > 5) {
+			list.innerHTML += `<li class="text-muted">...and ${state.csvData.rows.length - 5} more</li>`;
+		}
+		$("#csvPreview").style.display = "block";
+	});
+
+	$("#btnImportCSV")?.addEventListener("click", async () => {
+		if (!state.csvData) return;
+		
+		const colIndex = parseInt($("#csvColumn").value);
+		const items = state.csvData.rows.map(row => row[colIndex] || "").filter(Boolean);
+		
+		// Fill batch print modal
+		$("#batchTextInput").value = items.join("\n");
+		updateBatchCount();
+		
+		// Open batch print modal
+		const modal = new bootstrap.Modal($("#batchPrintModal"));
+		modal.show();
+		
+		showSuccess(`Imported ${items.length} items for batch printing`);
+	});
+
+	// ================== WiFi QR Generator ==================
+
+	$("#btnGenerateWifiQR")?.addEventListener("click", () => {
+		const ssid = $("#wifiSSID").value.trim();
+		const password = $("#wifiPassword").value;
+		const security = $("#wifiSecurity").value;
+		
+		if (!ssid) {
+			handleError("Please enter network name (SSID)");
+			return;
+		}
+		
+		const qrData = `WIFI:T:${security};S:${ssid};P:${password};;`;
+		$("#inputQR").value = qrData;
+		document.querySelector("#nav-qr-tab").click();
+		updateCanvasQR(canvas);
+		showSuccess("WiFi QR code generated!");
+	});
+
+	// ================== vCard Generator ==================
+
+	$("#btnGenerateVCard")?.addEventListener("click", () => {
+		const name = $("#vcardName").value.trim();
+		const phone = $("#vcardPhone").value.trim();
+		const email = $("#vcardEmail").value.trim();
+		const company = $("#vcardCompany").value.trim();
+		
+		if (!name && !phone && !email) {
+			handleError("Please enter at least one contact field");
+			return;
+		}
+		
+		const vcard = [
+			"BEGIN:VCARD",
+			"VERSION:3.0",
+			name ? `FN:${name}` : "",
+			phone ? `TEL:${phone}` : "",
+			email ? `EMAIL:${email}` : "",
+			company ? `ORG:${company}` : "",
+			"END:VCARD",
+		].filter(Boolean).join("\n");
+		
+		$("#inputQR").value = vcard;
+		document.querySelector("#nav-qr-tab").click();
+		updateCanvasQR(canvas);
+		showSuccess("Contact QR code generated!");
+	});
+
+	// ================== Print Queue ==================
+
+	const updateQueueUI = () => {
+		const status = printQueue.getStatus();
+		const queue = printQueue.getQueue();
+		
+		$("#queueCount").textContent = status.total;
+		$("#btnProcessQueue").disabled = status.total === 0;
+		$("#btnClearQueue").disabled = status.total === 0;
+		
+		const list = $("#printQueueList");
+		if (queue.length === 0) {
+			list.innerHTML = '<div class="text-muted text-center py-2 small">Queue is empty</div>';
+			return;
+		}
+		
+		list.innerHTML = queue.map((item, i) => `
+			<div class="queue-item ${item.status}" data-id="${item.id}">
+				<img src="${item.preview || ""}" class="queue-preview" alt="Preview" />
+				<div class="queue-info">
+					<div class="fw-semibold small">${item.text?.substring(0, 20) || "Label " + (i + 1)}${item.text?.length > 20 ? "..." : ""}</div>
+					<div class="text-muted small">${item.copies || 1} cop${(item.copies || 1) > 1 ? "ies" : "y"}</div>
+				</div>
+				<div class="queue-status">
+					${item.status === "pending" ? '<i class="bi bi-clock text-muted"></i>' : ""}
+					${item.status === "printing" ? '<div class="spinner-border spinner-border-sm text-primary"></div>' : ""}
+					${item.status === "completed" ? '<i class="bi bi-check-circle text-success"></i>' : ""}
+					${item.status === "failed" ? '<i class="bi bi-x-circle text-danger"></i>' : ""}
+				</div>
+			</div>
+		`).join("");
+	};
+
+	printQueue.on("onProgress", updateQueueUI);
+	printQueue.on("onComplete", () => {
+		showSuccess("Print queue completed!");
+		updateQueueUI();
+	});
+
+	$("#btnAddToQueue")?.addEventListener("click", () => {
+		const item = {
+			text: $("#inputText").value,
+			type: state.currentTab,
+			preview: canvas.toDataURL("image/png"),
+			copies: parseInt($("#printCopies").value) || 1,
+		};
+		printQueue.add(item);
+		updateQueueUI();
+		showSuccess("Added to print queue");
+	});
+
+	$("#btnProcessQueue")?.addEventListener("click", async () => {
+		const printItem = async (item) => {
+			// Restore item content
+			if (item.type === "text") {
+				$("#inputText").value = item.text;
+				updateCanvasText(canvas);
+			}
+			
+			await new Promise(resolve => setTimeout(resolve, 100));
+			
+			const char = state.characteristic || await connectPrinter();
+			if (!char) throw new Error("Not connected");
+			
+			const options = {
+				speed: parseInt($("#printSpeed").value) || 5,
+				density: parseInt($("#printDensity").value) || 9,
+				labelType: parseInt($("#labelType").value) || 0x0a,
+				copies: item.copies || 1,
+				spacing: parseInt($("#labelSpacing").value) || 0,
+			};
+			
+			await printCanvasAdvanced(char, canvas, state.printerModel, options);
+		};
+		
+		await printQueue.process(printItem, 500);
+	});
+
+	$("#btnClearQueue")?.addEventListener("click", () => {
+		if (confirm("Clear print queue?")) {
+			printQueue.clear();
+			updateQueueUI();
+		}
+	});
+
+	// ================== Smart Clipboard ==================
+
+	let lastClipboardSuggestion = null;
+
+	smartClipboard.on("onSuggestion", (suggestion) => {
+		if (suggestion.originalContent === lastClipboardSuggestion?.originalContent) return;
+		lastClipboardSuggestion = suggestion;
+		
+		const banner = $("#clipboardSuggestion");
+		const text = $("#clipboardSuggestionText");
+		
+		text.textContent = `${suggestion.suggestion}: "${suggestion.originalContent.substring(0, 30)}${suggestion.originalContent.length > 30 ? "..." : ""}"`;
+		banner.style.display = "block";
+		banner.classList.add("show");
+	});
+
+	$("#btnApplyClipboard")?.addEventListener("click", () => {
+		if (!lastClipboardSuggestion) return;
+		
+		const s = lastClipboardSuggestion;
+		
+		switch (s.type) {
+			case "text":
+				$("#inputText").value = s.text;
+				document.querySelector("#nav-text-tab").click();
+				updateCanvasText(canvas);
+				break;
+			case "barcode":
+				$("#inputBarcode").value = s.data;
+				if (s.barcodeFormat) $("#barcodeFormat").value = s.barcodeFormat;
+				document.querySelector("#nav-barcode-tab").click();
+				updateCanvasBarcode(canvas);
+				break;
+			case "qr":
+				$("#inputQR").value = s.data;
+				document.querySelector("#nav-qr-tab").click();
+				updateCanvasQR(canvas);
+				break;
+		}
+		
+		$("#clipboardSuggestion").style.display = "none";
+		showSuccess("Applied clipboard content");
+	});
+
+	// Start clipboard monitoring
+	smartClipboard.startMonitoring(2000);
+
+	// ================== PWA Install ==================
+
+	window.addEventListener("beforeinstallprompt", (e) => {
+		e.preventDefault();
+		state.deferredInstallPrompt = e;
+		$("#btnInstall").style.display = "inline-block";
+	});
+
+	$("#btnInstall")?.addEventListener("click", async () => {
+		if (!state.deferredInstallPrompt) return;
+		
+		state.deferredInstallPrompt.prompt();
+		const result = await state.deferredInstallPrompt.userChoice;
+		
+		if (result.outcome === "accepted") {
+			showSuccess("App installed!");
+		}
+		state.deferredInstallPrompt = null;
+		$("#btnInstall").style.display = "none";
+	});
+
+	// Register service worker
+	if ("serviceWorker" in navigator) {
+		navigator.serviceWorker.register("/sw.js").then((reg) => {
+			console.log("Service Worker registered:", reg.scope);
+		}).catch((err) => {
+			console.log("Service Worker registration failed:", err);
+		});
+	}
+
+	// ================== Initialize ==================
+
+	// Setup keyboard shortcuts
+	setupKeyboardShortcuts();
+
+	// Initialize emoji picker
+	initEmojiPicker();
+
+	// Initialize queue UI
+	updateQueueUI();
+
+	// Load saved settings
+	const settings = getSettings();
+	if (settings.defaultPrinter) {
+		$("#printerModel").value = settings.defaultPrinter;
+	}
+
+	// Initialize display
+	updateLabelSize(canvas);
+	updateCanvasText(canvas);
+	updatePrinterSettings(PrinterModel.D30);
+	updateTemplatesList();
+	updatePrintHistory();
 });
