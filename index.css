@@ -21,10 +21,12 @@ h1 {
 #canvas {
 	display: block;
 	background-color: #fff;
+	cursor: crosshair;
 }
 
 .nav-tabs .nav-link {
 	color: #495057;
+	font-size: 0.9rem;
 }
 
 .nav-tabs .nav-link.active {
@@ -38,6 +40,28 @@ h1 {
 .form-label {
 	font-weight: 500;
 	font-size: 0.9rem;
+}
+
+/* Status items in printer status panel */
+.status-item {
+	padding: 0.5rem;
+}
+
+.status-item i {
+	display: block;
+	margin-bottom: 0.25rem;
+}
+
+.status-item .text-success {
+	color: #198754 !important;
+}
+
+.status-item .text-warning {
+	color: #ffc107 !important;
+}
+
+.status-item .text-danger {
+	color: #dc3545 !important;
 }
 
 /* Progress bar animation */
@@ -211,4 +235,105 @@ h1 {
 .form-control.is-valid,
 .form-select.is-valid {
 	border-color: #198754;
+}
+
+/* Drawing tools */
+.btn-toolbar .btn.active {
+	background-color: #0d6efd;
+	color: white;
+	border-color: #0d6efd;
+}
+
+/* Template list */
+.template-item {
+	display: flex;
+	align-items: center;
+	padding: 0.5rem;
+	border-bottom: 1px solid #dee2e6;
+}
+
+.template-item:last-child {
+	border-bottom: none;
+}
+
+.template-item .template-preview {
+	width: 50px;
+	height: 50px;
+	object-fit: contain;
+	border: 1px solid #dee2e6;
+	border-radius: 4px;
+	margin-right: 0.75rem;
+	background: #fff;
+}
+
+.template-item .template-info {
+	flex: 1;
+}
+
+.template-item .template-name {
+	font-weight: 600;
+	margin-bottom: 0.125rem;
+}
+
+.template-item .template-meta {
+	font-size: 0.75rem;
+	color: #6c757d;
+}
+
+.template-item .template-actions {
+	display: flex;
+	gap: 0.25rem;
+}
+
+/* Print history items */
+.history-item {
+	display: flex;
+	align-items: center;
+	padding: 0.25rem 0;
+	border-bottom: 1px solid #eee;
+}
+
+.history-item:last-child {
+	border-bottom: none;
+}
+
+.history-item .history-icon {
+	margin-right: 0.5rem;
+}
+
+.history-item .history-info {
+	flex: 1;
+}
+
+.history-item .history-time {
+	font-size: 0.7rem;
+	color: #6c757d;
+}
+
+/* Keyboard shortcut styling */
+kbd {
+	background-color: #eee;
+	border-radius: 3px;
+	border: 1px solid #b4b4b4;
+	box-shadow: 0 1px 1px rgba(0, 0, 0, 0.2);
+	color: #333;
+	display: inline-block;
+	font-size: 0.75rem;
+	font-weight: 700;
+	line-height: 1;
+	padding: 2px 4px;
+	white-space: nowrap;
+}
+
+/* Responsive tab text */
+@media (max-width: 576px) {
+	.nav-tabs .nav-link {
+		padding: 0.5rem;
+		font-size: 0.8rem;
+	}
+	
+	.nav-tabs .nav-link i {
+		display: block;
+		margin-bottom: 0.25rem;
+	}
 }

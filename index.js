@@ -11,6 +11,23 @@ import {
 } from "./src/printer.js";
 import { applyDithering, DitheringAlgorithm, DitheringInfo } from "./src/dithering.js";
 import { detectPrinterModel } from "./src/printerModels.js";
+import { CanvasEditor } from "./src/canvasEditor.js";
+import { printerStatus, StatusEventType } from "./src/printerStatus.js";
+import {
+	getTemplates,
+	saveTemplate,
+	deleteTemplate,
+	getTemplateById,
+	exportTemplates,
+	importTemplates,
+	getPrintHistory,
+	addToHistory,
+	clearHistory,
+	getSettings,
+	saveSettings,
+	saveDevice,
+	getSavedDevices,
+} from "./src/storage.js";
 
 const $ = document.querySelector.bind(document);
 const $all = document.querySelectorAll.bind(document);
@@ -23,6 +40,8 @@ const state = {
 	device: null,
 	characteristic: null,
 	notifyCharacteristic: null,
+	canvasEditor: null,
+	currentTab: "text",
 };
 
 // ================== Utility Functions ==================
@@ -50,6 +69,7 @@ const updateConnectionStatus = (connected, deviceName = null) => {
 		statusBadge.classList.add("connected", "bg-success");
 		$("#btnConnect").innerHTML = '<i class="bi bi-bluetooth"></i> Disconnect';
 		$("#printerSettingsCard").style.display = "block";
+		$("#printerStatusCard").style.display = "block";
 		$("#printerName").textContent = deviceName;
 	} else {
 		statusBadge.innerHTML = '<i class="bi bi-bluetooth"></i> Not Connected';
@@ -57,6 +77,7 @@ const updateConnectionStatus = (connected, deviceName = null) => {
 		statusBadge.classList.add("bg-secondary");
 		$("#btnConnect").innerHTML = '<i class="bi bi-bluetooth"></i> Connect Printer';
 		$("#printerSettingsCard").style.display = "none";
+		$("#printerStatusCard").style.display = "none";
 	}
 };
 
@@ -467,10 +488,28 @@ const print = async (canvas) => {
 		showProgress(true, 100);
 		showSuccess("Print complete!");
 
+		// Add to print history
+		addToHistory({
+			templateName: state.currentTab,
+			type: state.currentTab,
+			preview: canvas.toDataURL("image/png"),
+			success: true,
+		});
+		updatePrintHistory();
+
 		setTimeout(() => showProgress(false), 1500);
 	} catch (e) {
 		handleError(e);
 		showProgress(false);
+		
+		// Add failed print to history
+		addToHistory({
+			templateName: state.currentTab,
+			type: state.currentTab,
+			preview: canvas.toDataURL("image/png"),
+			success: false,
+		});
+		updatePrintHistory();
 	} finally {
 		btnPrint.disabled = false;
 		btnPrint.classList.remove("printing");
@@ -551,6 +590,250 @@ const downloadImage = () => {
 	link.click();
 };
 
+// ================== Template Functions ==================
+
+const updateTemplatesList = () => {
+	const container = $("#templatesList");
+	const templates = getTemplates();
+
+	if (templates.length === 0) {
+		container.innerHTML = `
+			<div class="text-muted text-center py-3">
+				<i class="bi bi-inbox fs-1"></i>
+				<p>No saved templates yet</p>
+			</div>
+		`;
+		return;
+	}
+
+	container.innerHTML = templates
+		.map(
+			(t) => `
+		<div class="template-item" data-id="${t.id}">
+			<img src="${t.preview || ""}" alt="${t.name}" class="template-preview" />
+			<div class="template-info">
+				<div class="template-name">${t.name}</div>
+				<div class="template-meta">${t.type} • ${new Date(t.createdAt).toLocaleDateString()}</div>
+			</div>
+			<div class="template-actions">
+				<button type="button" class="btn btn-sm btn-outline-primary btn-load-template" title="Load">
+					<i class="bi bi-box-arrow-in-down"></i>
+				</button>
+				<button type="button" class="btn btn-sm btn-outline-danger btn-delete-template" title="Delete">
+					<i class="bi bi-trash"></i>
+				</button>
+			</div>
+		</div>
+	`
+		)
+		.join("");
+
+	// Add event listeners
+	container.querySelectorAll(".btn-load-template").forEach((btn) => {
+		btn.addEventListener("click", (e) => {
+			const id = e.target.closest(".template-item").dataset.id;
+			loadTemplate(id);
+		});
+	});
+
+	container.querySelectorAll(".btn-delete-template").forEach((btn) => {
+		btn.addEventListener("click", (e) => {
+			const id = e.target.closest(".template-item").dataset.id;
+			if (confirm("Delete this template?")) {
+				deleteTemplate(id);
+				updateTemplatesList();
+				showSuccess("Template deleted");
+			}
+		});
+	});
+};
+
+const saveCurrentAsTemplate = () => {
+	const canvas = $("#canvas");
+	const name = $("#templateName").value.trim();
+
+	if (!name) {
+		handleError("Please enter a template name");
+		return;
+	}
+
+	const template = {
+		name,
+		type: state.currentTab,
+		preview: canvas.toDataURL("image/png"),
+		labelSize: { ...state.labelSize },
+		content: getCurrentContent(),
+		settings: {
+			printerModel: state.printerModel,
+			density: parseInt($("#printDensity").value) || 9,
+			speed: parseInt($("#printSpeed").value) || 5,
+		},
+	};
+
+	saveTemplate(template);
+	updateTemplatesList();
+	showSuccess("Template saved!");
+
+	// Close modal
+	bootstrap.Modal.getInstance($("#saveTemplateModal"))?.hide();
+};
+
+const getCurrentContent = () => {
+	switch (state.currentTab) {
+		case "text":
+			return {
+				text: $("#inputText").value,
+				fontSize: parseInt($("#inputFontSize").value),
+				fontFamily: $("#fontFamily").value,
+				fontWeight: $("#fontWeight").value,
+				textAlign: $("#textAlign").value,
+			};
+		case "barcode":
+			return {
+				data: $("#inputBarcode").value,
+				format: $("#barcodeFormat").value,
+				width: parseInt($("#barcodeWidth").value),
+				showText: $("#barcodeShowText").checked,
+			};
+		case "qr":
+			return {
+				data: $("#inputQR").value,
+				errorCorrection: $("#qrErrorCorrection").value,
+				margin: parseInt($("#qrMargin").value),
+			};
+		default:
+			return {};
+	}
+};
+
+const loadTemplate = (id) => {
+	const template = getTemplateById(id);
+	if (!template) {
+		handleError("Template not found");
+		return;
+	}
+
+	// Set label size
+	$("#inputWidth").value = template.labelSize.width;
+	$("#inputHeight").value = template.labelSize.height;
+	updateLabelSize($("#canvas"));
+
+	// Set content based on type
+	if (template.type === "text" && template.content) {
+		$("#inputText").value = template.content.text || "";
+		$("#inputFontSize").value = template.content.fontSize || 48;
+		$("#fontFamily").value = template.content.fontFamily || "sans-serif";
+		$("#fontWeight").value = template.content.fontWeight || "normal";
+		$("#textAlign").value = template.content.textAlign || "center";
+
+		// Switch to text tab
+		document.querySelector("#nav-text-tab").click();
+	} else if (template.type === "barcode" && template.content) {
+		$("#inputBarcode").value = template.content.data || "";
+		$("#barcodeFormat").value = template.content.format || "CODE128";
+		$("#barcodeWidth").value = template.content.width || 2;
+		$("#barcodeShowText").checked = template.content.showText !== false;
+
+		document.querySelector("#nav-barcode-tab").click();
+	} else if (template.type === "qr" && template.content) {
+		$("#inputQR").value = template.content.data || "";
+		$("#qrErrorCorrection").value = template.content.errorCorrection || "M";
+		$("#qrMargin").value = template.content.margin || 2;
+
+		document.querySelector("#nav-qr-tab").click();
+	}
+
+	showSuccess(`Loaded template: ${template.name}`);
+};
+
+// ================== Print History Functions ==================
+
+const updatePrintHistory = () => {
+	const container = $("#printHistoryList");
+	const history = getPrintHistory(10);
+
+	if (history.length === 0) {
+		container.innerHTML = '<div class="text-muted text-center py-2">No print history yet</div>';
+		return;
+	}
+
+	container.innerHTML = history
+		.map(
+			(h) => `
+		<div class="history-item">
+			<span class="history-icon">
+				<i class="bi ${h.success ? "bi-check-circle text-success" : "bi-x-circle text-danger"}"></i>
+			</span>
+			<div class="history-info">
+				${h.type} label
+				<div class="history-time">${new Date(h.timestamp).toLocaleString()}</div>
+			</div>
+		</div>
+	`
+		)
+		.join("");
+};
+
+// ================== Printer Status Functions ==================
+
+const updateStatusDisplay = () => {
+	const status = printerStatus.getStatus();
+
+	// Battery
+	if (status.battery !== null) {
+		$("#batteryLevel").textContent = `${status.battery}%`;
+		$("#batteryIcon").className = `bi ${printerStatus.getBatteryIcon()} fs-4`;
+	}
+
+	// Paper
+	if (status.hasPaper !== null) {
+		$("#paperStatus").textContent = status.hasPaper ? "OK" : "Empty";
+		$("#paperIcon").className = `bi bi-file-earmark fs-4 ${status.hasPaper ? "text-success" : "text-danger"}`;
+	}
+
+	// Cover
+	if (status.coverClosed !== null) {
+		$("#coverStatus").textContent = status.coverClosed ? "Closed" : "Open";
+		$("#coverIcon").className = `bi bi-box fs-4 ${status.coverClosed ? "text-success" : "text-warning"}`;
+	}
+
+	// Ready status
+	$("#printerReadyStatus").textContent = printerStatus.getStatusMessage();
+	$("#readyIcon").className = `bi fs-4 ${
+		printerStatus.isReady() ? "bi-check-circle text-success" : "bi-exclamation-circle text-warning"
+	}`;
+};
+
+// ================== Keyboard Shortcuts ==================
+
+const setupKeyboardShortcuts = () => {
+	document.addEventListener("keydown", (e) => {
+		// Ctrl+P - Print
+		if (e.ctrlKey && e.key === "p") {
+			e.preventDefault();
+			$("#btnPrint").click();
+		}
+
+		// Ctrl+S - Save template
+		if (e.ctrlKey && e.key === "s") {
+			e.preventDefault();
+			$("#btnSaveTemplate").click();
+		}
+
+		// Ctrl+Z - Undo (in draw mode)
+		if (e.ctrlKey && e.key === "z" && state.currentTab === "draw" && state.canvasEditor) {
+			e.preventDefault();
+			state.canvasEditor.undo();
+		}
+
+		// Ctrl+Y - Redo (in draw mode)
+		if (e.ctrlKey && e.key === "y" && state.currentTab === "draw" && state.canvasEditor) {
+			e.preventDefault();
+			state.canvasEditor.redo();
+		}
+	});
+};
+
 // ================== Event Handlers ==================
 
 document.addEventListener("DOMContentLoaded", function () {
@@ -558,10 +841,20 @@ document.addEventListener("DOMContentLoaded", function () {
 
 	// Tab change events
 	document.addEventListener("shown.bs.tab", (e) => {
+		state.currentTab = e.target.id.replace("nav-", "").replace("-tab", "");
+		
 		if (e.target.id === "nav-text-tab") updateCanvasText(canvas);
 		else if (e.target.id === "nav-barcode-tab") updateCanvasBarcode(canvas);
 		else if (e.target.id === "nav-image-tab") updateCanvasImage(canvas);
 		else if (e.target.id === "nav-qr-tab") updateCanvasQR(canvas);
+		else if (e.target.id === "nav-draw-tab") {
+			// Initialize canvas editor if not already done
+			if (!state.canvasEditor) {
+				state.canvasEditor = new CanvasEditor(canvas);
+			}
+		} else if (e.target.id === "nav-templates-tab") {
+			updateTemplatesList();
+		}
 	});
 
 	// Label size inputs
@@ -640,8 +933,160 @@ document.addEventListener("DOMContentLoaded", function () {
 	// Dithering preview button
 	$("#btnPreviewDithering").addEventListener("click", showDitheringPreview);
 
-	// Initialize
+	// ================== Drawing Tools ==================
+	
+	// Tool buttons
+	const toolButtons = {
+		toolPen: "pen",
+		toolEraser: "eraser",
+		toolLine: "line",
+		toolRect: "rectangle",
+		toolCircle: "circle",
+	};
+
+	Object.keys(toolButtons).forEach((btnId) => {
+		const btn = $(`#${btnId}`);
+		if (btn) {
+			btn.addEventListener("click", () => {
+				// Remove active from all tool buttons
+				Object.keys(toolButtons).forEach((id) => $(`#${id}`)?.classList.remove("active"));
+				btn.classList.add("active");
+				if (state.canvasEditor) {
+					state.canvasEditor.setTool(toolButtons[btnId]);
+				}
+			});
+		}
+	});
+
+	// Undo/Redo
+	$("#btnUndo")?.addEventListener("click", () => state.canvasEditor?.undo());
+	$("#btnRedo")?.addEventListener("click", () => state.canvasEditor?.redo());
+
+	// Clear canvas
+	$("#btnClearCanvas")?.addEventListener("click", () => {
+		if (state.canvasEditor) {
+			state.canvasEditor.clear();
+		}
+	});
+
+	// Invert canvas
+	$("#btnInvertCanvas")?.addEventListener("click", () => {
+		if (state.canvasEditor) {
+			state.canvasEditor.invert();
+		}
+	});
+
+	// Drawing color
+	$("#drawColor")?.addEventListener("input", (e) => {
+		if (state.canvasEditor) {
+			state.canvasEditor.setColor(e.target.value);
+		}
+	});
+
+	// Drawing line width
+	$("#drawLineWidth")?.addEventListener("input", (e) => {
+		if (state.canvasEditor) {
+			state.canvasEditor.setLineWidth(parseInt(e.target.value));
+		}
+	});
+
+	// ================== Template Management ==================
+
+	// Save template button
+	$("#btnSaveTemplate")?.addEventListener("click", () => {
+		// Copy canvas to template preview
+		const templatePreview = $("#templatePreview");
+		if (templatePreview) {
+			templatePreview.width = canvas.width;
+			templatePreview.height = canvas.height;
+			const ctx = templatePreview.getContext("2d");
+			ctx.drawImage(canvas, 0, 0);
+		}
+		$("#templateName").value = "";
+		const modal = new bootstrap.Modal($("#saveTemplateModal"));
+		modal.show();
+	});
+
+	// Confirm save template
+	$("#btnConfirmSaveTemplate")?.addEventListener("click", saveCurrentAsTemplate);
+
+	// Export templates
+	$("#btnExportTemplates")?.addEventListener("click", () => {
+		const data = exportTemplates();
+		const blob = new Blob([data], { type: "application/json" });
+		const url = URL.createObjectURL(blob);
+		const link = document.createElement("a");
+		link.href = url;
+		link.download = "phomemo-templates.json";
+		link.click();
+		URL.revokeObjectURL(url);
+		showSuccess("Templates exported!");
+	});
+
+	// Import templates
+	$("#btnImportTemplates")?.addEventListener("click", () => {
+		$("#importTemplateFile").click();
+	});
+
+	$("#importTemplateFile")?.addEventListener("change", (e) => {
+		const file = e.target.files[0];
+		if (!file) return;
+
+		const reader = new FileReader();
+		reader.onload = (event) => {
+			try {
+				const count = importTemplates(event.target.result, true);
+				updateTemplatesList();
+				showSuccess(`Imported ${count} template(s)!`);
+			} catch (err) {
+				handleError("Failed to import templates: " + err.message);
+			}
+		};
+		reader.readAsText(file);
+		e.target.value = ""; // Reset file input
+	});
+
+	// ================== Print History ==================
+
+	// Clear history button
+	$("#btnClearHistory")?.addEventListener("click", () => {
+		if (confirm("Clear all print history?")) {
+			clearHistory();
+			updatePrintHistory();
+			showSuccess("Print history cleared");
+		}
+	});
+
+	// ================== Printer Status ==================
+
+	// Refresh status button
+	$("#btnRefreshStatus")?.addEventListener("click", async () => {
+		if (state.connected) {
+			await printerStatus.queryAllStatus();
+			updateStatusDisplay();
+		}
+	});
+
+	// Status event listeners
+	printerStatus.on(StatusEventType.BATTERY, updateStatusDisplay);
+	printerStatus.on(StatusEventType.PAPER, updateStatusDisplay);
+	printerStatus.on(StatusEventType.COVER, updateStatusDisplay);
+
+	// ================== Initialize ==================
+
+	// Setup keyboard shortcuts
+	setupKeyboardShortcuts();
+
+	// Load saved settings
+	const settings = getSettings();
+	if (settings.defaultPrinter) {
+		$("#printerModel").value = settings.defaultPrinter;
+	}
+
+	// Initialize display
 	updateLabelSize(canvas);
 	updateCanvasText(canvas);
 	updatePrinterSettings(PrinterModel.D30);
+	updateTemplatesList();
+	updatePrintHistory();
 });

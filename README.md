@@ -48,6 +48,11 @@ For optimal image quality on thermal printers, multiple dithering algorithms are
 - **Label Type**: Gaps, Continuous, or Marks
 
 ### Additional Features
+- **Canvas Drawing Tools**: Draw custom labels with pen, shapes, undo/redo
+- **Template System**: Save, load, export/import label templates
+- **Print History**: Track recent prints with success/failure status
+- **Printer Status Monitoring**: Real-time battery, paper, and cover status
+- **Keyboard Shortcuts**: Ctrl+P (print), Ctrl+S (save), Ctrl+Z/Y (undo/redo)
 - Persistent Bluetooth connection
 - Multiple copies with spacing control
 - Label size presets (Standard, Long, Square, Fruit)
@@ -57,14 +62,23 @@ For optimal image quality on thermal printers, multiple dithering algorithms are
 - Real-time preview
 - Progress indicator during printing
 - Dark mode support
+- LocalStorage for settings persistence
 
 ## Usage
 
 1. Open the web interface in a Web Bluetooth-compatible browser
 2. Click "Connect Printer" and select your Phomemo device
-3. Choose content type (Text, Barcode, Image, or QR Code)
+3. Choose content type (Text, Barcode, Image, QR Code, or Draw)
 4. Configure settings as needed
 5. Click "Print Label"
+
+### Keyboard Shortcuts
+| Shortcut | Action |
+|----------|--------|
+| Ctrl+P | Print current label |
+| Ctrl+S | Save as template |
+| Ctrl+Z | Undo (Draw mode) |
+| Ctrl+Y | Redo (Draw mode) |
 
 ## Technical Details
 
