@@ -553,23 +553,6 @@ const downloadImage = () => {
 
 // ================== Event Handlers ==================
 
-const getCurrentUpdateFunction = () => {
-	const activeTab = $(".nav-link.active")?.id;
-
-	switch (activeTab) {
-		case "nav-text-tab":
-			return updateCanvasText;
-		case "nav-barcode-tab":
-			return updateCanvasBarcode;
-		case "nav-image-tab":
-			return updateCanvasImage;
-		case "nav-qr-tab":
-			return updateCanvasQR;
-		default:
-			return updateCanvasText;
-	}
-};
-
 document.addEventListener("DOMContentLoaded", function () {
 	const canvas = $("#canvas");
 

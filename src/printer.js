@@ -38,7 +38,6 @@ export const setPacketSize = (size) => {
 const ESC = 0x1b; // Escape
 const GS = 0x1d; // Group Separator
 const US = 0x1f; // Unit Separator
-const NAK = 0x15; // Negative Acknowledge
 
 /**
  * Generate header data for D-type printers (D30, D35, P12Pro)
