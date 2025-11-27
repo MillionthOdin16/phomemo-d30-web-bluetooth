@@ -501,7 +501,6 @@ const print = async (canvas) => {
 	} catch (e) {
 		handleError(e);
 		showProgress(false);
-		
 		// Add failed print to history
 		addToHistory({
 			templateName: state.currentTab,
