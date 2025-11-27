@@ -161,6 +161,11 @@ const updateCanvasText = (canvas) => {
 	const textAlign = $("#textAlign").value;
 	const fontFamily = $("#fontFamily").value;
 	const fontWeight = $("#fontWeight").value;
+	const textColor = $("#textColor")?.value || "#000000";
+	const textOutline = $("#textOutline")?.checked || false;
+	const textShadow = $("#textShadow")?.checked || false;
+	const textBgTransparent = $("#textBgTransparent")?.checked ?? true;
+	const textBgColor = $("#textBgColor")?.value || "#ffffff";
 
 	if (isNaN(fontSize) || fontSize < 1) {
 		handleError("Invalid font size");
@@ -168,14 +173,16 @@ const updateCanvasText = (canvas) => {
 	}
 
 	const ctx = canvas.getContext("2d");
-	ctx.fillStyle = "#fff";
+	
+	// Background
+	ctx.fillStyle = textBgTransparent ? "#fff" : textBgColor;
 	ctx.fillRect(0, 0, canvas.width, canvas.height);
 
 	ctx.save();
 	ctx.translate(canvas.width / 2, canvas.height / 2);
 	ctx.rotate(Math.PI / 2);
 
-	ctx.fillStyle = "#000";
+	ctx.fillStyle = textColor;
 	ctx.textAlign = textAlign;
 	ctx.textBaseline = "top";
 
@@ -183,6 +190,14 @@ const updateCanvasText = (canvas) => {
 	let fontStyle = "";
 	if (fontWeight.includes("bold")) fontStyle += "bold ";
 	if (fontWeight.includes("italic")) fontStyle += "italic ";
+
+	// Apply shadow effect
+	if (textShadow) {
+		ctx.shadowColor = "rgba(0, 0, 0, 0.5)";
+		ctx.shadowBlur = 4;
+		ctx.shadowOffsetX = 2;
+		ctx.shadowOffsetY = 2;
+	}
 
 	drawText(ctx, text, {
 		x: -canvas.height / 2,
@@ -195,6 +210,26 @@ const updateCanvasText = (canvas) => {
 		align: textAlign,
 		vAlign: "middle",
 	});
+
+	// Apply outline effect (draw text again with stroke)
+	if (textOutline) {
+		ctx.shadowColor = "transparent";
+		ctx.strokeStyle = textColor === "#000000" ? "#ffffff" : "#000000";
+		ctx.lineWidth = 2;
+		ctx.font = `${fontStyle}${fontSize}px ${fontFamily}`;
+		
+		// Draw outline by stroking text
+		const lines = text.split("\n");
+		const lineHeight = fontSize * 1.2;
+		const startY = -canvas.width / 2 + (canvas.width - lines.length * lineHeight) / 2;
+		
+		lines.forEach((line, i) => {
+			let x = 0;
+			if (textAlign === "left") x = -canvas.height / 2;
+			else if (textAlign === "right") x = canvas.height / 2;
+			ctx.strokeText(line, x, startY + i * lineHeight);
+		});
+	}
 
 	ctx.restore();
 };
@@ -245,7 +280,14 @@ const updateCanvasBarcode = (canvas) => {
 };
 
 const drawImageToCanvas = (ctx, url, canvas, options = {}) => {
-	const { doScale = true, dithering = DitheringAlgorithm.FLOYD_STEINBERG, threshold = 128, invert = false } = options;
+	const { 
+		doScale = true, 
+		dithering = DitheringAlgorithm.FLOYD_STEINBERG, 
+		threshold = 128, 
+		invert = false,
+		brightness = 0,
+		contrast = 0
+	} = options;
 
 	const img = new Image();
 
@@ -267,22 +309,47 @@ const drawImageToCanvas = (ctx, url, canvas, options = {}) => {
 		ctx.drawImage(img, -drawWidth / 2, -drawHeight / 2, drawWidth, drawHeight);
 		ctx.restore();
 
+		// Apply brightness/contrast and dithering
+		const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+		const data = imageData.data;
+
+		// Apply brightness and contrast
+		if (brightness !== 0 || contrast !== 0) {
+			const contrastFactor = (259 * (contrast + 255)) / (255 * (259 - contrast));
+			
+			for (let i = 0; i < data.length; i += 4) {
+				// Apply brightness
+				let r = data[i] + brightness;
+				let g = data[i + 1] + brightness;
+				let b = data[i + 2] + brightness;
+				
+				// Apply contrast
+				r = contrastFactor * (r - 128) + 128;
+				g = contrastFactor * (g - 128) + 128;
+				b = contrastFactor * (b - 128) + 128;
+				
+				// Clamp values
+				data[i] = Math.max(0, Math.min(255, r));
+				data[i + 1] = Math.max(0, Math.min(255, g));
+				data[i + 2] = Math.max(0, Math.min(255, b));
+			}
+		}
+
+		// Invert if requested
+		if (invert) {
+			for (let i = 0; i < data.length; i += 4) {
+				data[i] = 255 - data[i];
+				data[i + 1] = 255 - data[i + 1];
+				data[i + 2] = 255 - data[i + 2];
+			}
+		}
+
 		// Apply dithering if needed
 		if (dithering !== DitheringAlgorithm.NONE) {
-			const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-
-			// Invert if requested
-			if (invert) {
-				for (let i = 0; i < imageData.data.length; i += 4) {
-					imageData.data[i] = 255 - imageData.data[i];
-					imageData.data[i + 1] = 255 - imageData.data[i + 1];
-					imageData.data[i + 2] = 255 - imageData.data[i + 2];
-				}
-			}
-
 			applyDithering(imageData, dithering, threshold);
-			ctx.putImageData(imageData, 0, 0);
 		}
+		
+		ctx.putImageData(imageData, 0, 0);
 	});
 
 	img.addEventListener("error", () => {
@@ -309,12 +376,16 @@ const updateCanvasImage = (canvas) => {
 		const threshold = parseInt($("#imageThreshold").value) || 128;
 		const invert = $("#imageInvert").checked;
 		const fitToLabel = $("#imageFitToLabel").checked;
+		const brightness = parseInt($("#imageBrightness")?.value) || 0;
+		const contrast = parseInt($("#imageContrast")?.value) || 0;
 
 		drawImageToCanvas(ctx, e.target.result, canvas, {
 			doScale: fitToLabel,
 			dithering,
 			threshold,
 			invert,
+			brightness,
+			contrast,
 		});
 	});
 
@@ -833,6 +904,204 @@ const setupKeyboardShortcuts = () => {
 	});
 };
 
+// ================== Batch Print Functions ==================
+
+const batchPrint = async (canvas) => {
+	const textInput = $("#batchTextInput").value.trim();
+	if (!textInput) {
+		handleError("Please enter some text items to print");
+		return;
+	}
+
+	const items = textInput.split("\n").filter(line => line.trim());
+	const copiesEach = parseInt($("#batchCopiesEach").value) || 1;
+	const delay = parseInt($("#batchDelay").value) || 500;
+	const totalLabels = items.length * copiesEach;
+
+	const progressDiv = $("#batchProgress");
+	const progressBar = $("#batchProgressBar");
+	const statusDiv = $("#batchStatus");
+	const statusText = $("#batchStatusText");
+	const btnStart = $("#btnStartBatchPrint");
+
+	btnStart.disabled = true;
+	progressDiv.style.display = "flex";
+	statusDiv.style.display = "block";
+
+	try {
+		let char = state.characteristic;
+		if (!char) {
+			char = await connectPrinter();
+			if (!char) throw new Error("Failed to connect to printer");
+		}
+
+		let printed = 0;
+		for (let i = 0; i < items.length; i++) {
+			const item = items[i].trim();
+			
+			// Update text and redraw canvas
+			$("#inputText").value = item;
+			updateCanvasText(canvas);
+			
+			// Wait for canvas to update
+			await new Promise(resolve => setTimeout(resolve, 100));
+
+			for (let c = 0; c < copiesEach; c++) {
+				statusText.textContent = `Printing: "${item}" (${printed + 1}/${totalLabels})`;
+				
+				const options = {
+					speed: parseInt($("#printSpeed").value) || 5,
+					density: parseInt($("#printDensity").value) || 9,
+					labelType: parseInt($("#labelType").value) || 0x0a,
+					copies: 1,
+					spacing: parseInt($("#labelSpacing").value) || 0,
+				};
+
+				await printCanvasAdvanced(char, canvas, state.printerModel, options);
+				
+				printed++;
+				const progress = (printed / totalLabels) * 100;
+				progressBar.style.width = `${progress}%`;
+				progressBar.textContent = `${Math.round(progress)}%`;
+
+				// Delay between prints
+				if (printed < totalLabels) {
+					await new Promise(resolve => setTimeout(resolve, delay));
+				}
+			}
+		}
+
+		statusText.textContent = `Complete! Printed ${totalLabels} labels.`;
+		showSuccess(`Batch print complete: ${totalLabels} labels printed`);
+
+	} catch (e) {
+		handleError(e);
+		statusText.textContent = `Error: ${e.message}`;
+	} finally {
+		btnStart.disabled = false;
+	}
+};
+
+const updateBatchCount = () => {
+	const textInput = $("#batchTextInput")?.value?.trim() || "";
+	const items = textInput.split("\n").filter(line => line.trim()).length;
+	const copiesEach = parseInt($("#batchCopiesEach")?.value) || 1;
+	const total = items * copiesEach;
+	const countEl = $("#batchTotalCount");
+	if (countEl) countEl.textContent = total;
+};
+
+// ================== Quick Text Presets ==================
+
+const textPresets = {
+	name: { text: "Your Name Here", fontSize: 36, fontWeight: "bold" },
+	price: { text: "$0.00", fontSize: 48, fontWeight: "bold" },
+	warning: { text: "⚠️ WARNING", fontSize: 32, fontWeight: "bold" },
+	fragile: { text: "📦 FRAGILE\nHandle with care", fontSize: 24, fontWeight: "bold" },
+};
+
+const applyTextPreset = (presetName) => {
+	const preset = textPresets[presetName];
+	if (!preset) return;
+
+	$("#inputText").value = preset.text;
+	if (preset.fontSize) $("#inputFontSize").value = preset.fontSize;
+	if (preset.fontWeight) $("#fontWeight").value = preset.fontWeight;
+	
+	updateCanvasText($("#canvas"));
+};
+
+// ================== Emoji Picker ==================
+
+const commonEmojis = [
+	"😀", "😃", "😄", "😁", "😊", "🥰", "😍", "🤩",
+	"😎", "🤔", "🙄", "😤", "😭", "🥺", "😱", "🤯",
+	"⚠️", "✓", "✗", "★", "♥", "💯", "🔥", "💰",
+	"📦", "🎁", "📍", "🏠", "🚗", "✈️", "🎉", "🎂",
+	"☀️", "🌙", "⭐", "🌈", "❄️", "💧", "🌸", "🍎",
+	"🍕", "🍔", "☕", "🍷", "🎵", "📱", "💻", "📷",
+	"👍", "👎", "👋", "🙏", "💪", "🎯", "🏆", "🎨"
+];
+
+const initEmojiPicker = () => {
+	const grid = $("#emojiGrid");
+	if (!grid) return;
+
+	grid.innerHTML = commonEmojis.map(emoji => 
+		`<span class="emoji-btn" data-emoji="${emoji}">${emoji}</span>`
+	).join("");
+
+	grid.querySelectorAll(".emoji-btn").forEach(btn => {
+		btn.addEventListener("click", () => {
+			const emoji = btn.dataset.emoji;
+			insertEmoji(emoji);
+			bootstrap.Modal.getInstance($("#emojiPickerModal"))?.hide();
+		});
+	});
+};
+
+const insertEmoji = (emoji) => {
+	const textarea = $("#inputText");
+	if (!textarea) return;
+
+	const start = textarea.selectionStart;
+	const end = textarea.selectionEnd;
+	const text = textarea.value;
+	
+	textarea.value = text.substring(0, start) + emoji + text.substring(end);
+	textarea.selectionStart = textarea.selectionEnd = start + emoji.length;
+	textarea.focus();
+	
+	updateCanvasText($("#canvas"));
+};
+
+// ================== Image Manipulation Functions ==================
+
+const rotateCanvasImage = (canvas, degrees) => {
+	const ctx = canvas.getContext("2d");
+	const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+	
+	const tempCanvas = document.createElement("canvas");
+	tempCanvas.width = canvas.width;
+	tempCanvas.height = canvas.height;
+	const tempCtx = tempCanvas.getContext("2d");
+	tempCtx.putImageData(imageData, 0, 0);
+	
+	ctx.fillStyle = "#fff";
+	ctx.fillRect(0, 0, canvas.width, canvas.height);
+	
+	ctx.save();
+	ctx.translate(canvas.width / 2, canvas.height / 2);
+	ctx.rotate((degrees * Math.PI) / 180);
+	ctx.drawImage(tempCanvas, -canvas.width / 2, -canvas.height / 2);
+	ctx.restore();
+};
+
+const flipCanvasImage = (canvas, direction) => {
+	const ctx = canvas.getContext("2d");
+	const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+	
+	const tempCanvas = document.createElement("canvas");
+	tempCanvas.width = canvas.width;
+	tempCanvas.height = canvas.height;
+	const tempCtx = tempCanvas.getContext("2d");
+	tempCtx.putImageData(imageData, 0, 0);
+	
+	ctx.fillStyle = "#fff";
+	ctx.fillRect(0, 0, canvas.width, canvas.height);
+	
+	ctx.save();
+	if (direction === "horizontal") {
+		ctx.translate(canvas.width, 0);
+		ctx.scale(-1, 1);
+	} else {
+		ctx.translate(0, canvas.height);
+		ctx.scale(1, -1);
+	}
+	ctx.drawImage(tempCanvas, 0, 0);
+	ctx.restore();
+};
+
 // ================== Event Handlers ==================
 
 document.addEventListener("DOMContentLoaded", function () {
@@ -882,6 +1151,32 @@ document.addEventListener("DOMContentLoaded", function () {
 		e.addEventListener("input", () => updateCanvasText(canvas))
 	);
 
+	// Text effect inputs
+	$all("#textColor, #textBgColor, #textBgTransparent, #textOutline, #textShadow").forEach((el) => {
+		if (el) el.addEventListener("change", () => updateCanvasText(canvas));
+	});
+
+	// Quick Text Presets
+	$all(".quick-text-preset").forEach((btn) => {
+		btn.addEventListener("click", () => {
+			const preset = btn.dataset.preset;
+			applyTextPreset(preset);
+		});
+	});
+
+	// Quick Emoji Bar
+	$all("#quickEmojiBar .emoji-btn").forEach((btn) => {
+		btn.addEventListener("click", () => {
+			insertEmoji(btn.dataset.emoji);
+		});
+	});
+
+	// Emoji Picker Button
+	$("#btnEmojiPicker")?.addEventListener("click", () => {
+		const modal = new bootstrap.Modal($("#emojiPickerModal"));
+		modal.show();
+	});
+
 	// Barcode inputs
 	$all("#inputBarcode, #barcodeFormat, #barcodeWidth, #barcodeShowText").forEach((e) =>
 		e.addEventListener("input", () => updateCanvasBarcode(canvas))
@@ -893,6 +1188,42 @@ document.addEventListener("DOMContentLoaded", function () {
 	$all("#ditheringAlgorithm, #imageThreshold, #imageInvert, #imageFitToLabel").forEach((e) =>
 		e.addEventListener("change", () => updateCanvasImage(canvas))
 	);
+
+	// Image brightness/contrast
+	$all("#imageBrightness, #imageContrast").forEach((el) => {
+		if (el) {
+			el.addEventListener("input", (e) => {
+				const valueEl = $(`#${e.target.id.replace("image", "").toLowerCase()}Value`);
+				if (valueEl) valueEl.textContent = e.target.value;
+				updateCanvasImage(canvas);
+			});
+		}
+	});
+
+	// Image rotation buttons
+	$("#btnRotateLeft")?.addEventListener("click", () => {
+		// Store current image and rotate
+		rotateCanvasImage(canvas, -90);
+	});
+	$("#btnRotateRight")?.addEventListener("click", () => {
+		rotateCanvasImage(canvas, 90);
+	});
+	$("#btnRotate180")?.addEventListener("click", () => {
+		rotateCanvasImage(canvas, 180);
+	});
+	$("#btnFlipH")?.addEventListener("click", () => {
+		flipCanvasImage(canvas, "horizontal");
+	});
+	$("#btnFlipV")?.addEventListener("click", () => {
+		flipCanvasImage(canvas, "vertical");
+	});
+	$("#btnResetImage")?.addEventListener("click", () => {
+		$("#imageBrightness").value = 0;
+		$("#imageContrast").value = 0;
+		$("#brightnessValue").textContent = "0";
+		$("#contrastValue").textContent = "0";
+		updateCanvasImage(canvas);
+	});
 
 	// Threshold value display
 	$("#imageThreshold").addEventListener("input", (e) => {
@@ -931,6 +1262,54 @@ document.addEventListener("DOMContentLoaded", function () {
 
 	// Dithering preview button
 	$("#btnPreviewDithering").addEventListener("click", showDitheringPreview);
+
+	// ================== Batch Print ==================
+
+	$("#btnBatchPrint")?.addEventListener("click", () => {
+		const modal = new bootstrap.Modal($("#batchPrintModal"));
+		modal.show();
+	});
+
+	$("#batchTextInput")?.addEventListener("input", updateBatchCount);
+	$("#batchCopiesEach")?.addEventListener("input", updateBatchCount);
+
+	$("#btnStartBatchPrint")?.addEventListener("click", () => {
+		batchPrint(canvas);
+	});
+
+	// ================== Quick Print Buttons ==================
+
+	$("#btnPrint1x")?.addEventListener("click", () => {
+		$("#printCopies").value = 1;
+		print(canvas);
+	});
+	$("#btnPrint3x")?.addEventListener("click", () => {
+		$("#printCopies").value = 3;
+		print(canvas);
+	});
+	$("#btnPrint5x")?.addEventListener("click", () => {
+		$("#printCopies").value = 5;
+		print(canvas);
+	});
+	$("#btnPrint10x")?.addEventListener("click", () => {
+		$("#printCopies").value = 10;
+		print(canvas);
+	});
+
+	// ================== Canvas Zoom ==================
+
+	let zoomLevel = 1;
+	const container = $("#canvasContainer");
+
+	$("#btnZoomIn")?.addEventListener("click", () => {
+		zoomLevel = Math.min(zoomLevel + 0.25, 2);
+		container.style.transform = `scale(${zoomLevel})`;
+	});
+
+	$("#btnZoomOut")?.addEventListener("click", () => {
+		zoomLevel = Math.max(zoomLevel - 0.25, 0.5);
+		container.style.transform = `scale(${zoomLevel})`;
+	});
 
 	// ================== Drawing Tools ==================
 	
@@ -1075,6 +1454,9 @@ document.addEventListener("DOMContentLoaded", function () {
 
 	// Setup keyboard shortcuts
 	setupKeyboardShortcuts();
+
+	// Initialize emoji picker
+	initEmojiPicker();
 
 	// Load saved settings
 	const settings = getSettings();

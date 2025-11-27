@@ -238,6 +238,26 @@
 								tabindex="0"
 							>
 								<h5><i class="bi bi-fonts"></i> Text Label</h5>
+								
+								<!-- Quick Text Presets -->
+								<div class="mb-3">
+									<label class="form-label">Quick Presets</label>
+									<div class="btn-group btn-group-sm flex-wrap" role="group">
+										<button type="button" class="btn btn-outline-secondary quick-text-preset" data-preset="name">
+											<i class="bi bi-person"></i> Name Tag
+										</button>
+										<button type="button" class="btn btn-outline-secondary quick-text-preset" data-preset="price">
+											<i class="bi bi-tag"></i> Price Tag
+										</button>
+										<button type="button" class="btn btn-outline-secondary quick-text-preset" data-preset="warning">
+											<i class="bi bi-exclamation-triangle"></i> Warning
+										</button>
+										<button type="button" class="btn btn-outline-secondary quick-text-preset" data-preset="fragile">
+											<i class="bi bi-box"></i> Fragile
+										</button>
+									</div>
+								</div>
+
 								<div class="row mb-2">
 									<div class="col-6">
 										<label for="inputFontSize" class="form-label">Font Size</label>
@@ -277,6 +297,8 @@
 											<option value="Times New Roman">Times New Roman</option>
 											<option value="Courier New">Courier New</option>
 											<option value="Georgia">Georgia</option>
+											<option value="Impact">Impact</option>
+											<option value="Comic Sans MS">Comic Sans MS</option>
 										</select>
 									</div>
 									<div class="col-6">
@@ -289,9 +311,67 @@
 										</select>
 									</div>
 								</div>
+								
+								<!-- Text Effects -->
+								<div class="card mb-2">
+									<div class="card-header py-2" data-bs-toggle="collapse" data-bs-target="#textEffectsCollapse" style="cursor: pointer">
+										<small><i class="bi bi-stars"></i> Text Effects <i class="bi bi-chevron-down float-end"></i></small>
+									</div>
+									<div class="collapse" id="textEffectsCollapse">
+										<div class="card-body py-2">
+											<div class="row mb-2">
+												<div class="col-6">
+													<label for="textColor" class="form-label small">Text Color</label>
+													<input type="color" class="form-control form-control-color w-100" id="textColor" value="#000000" />
+												</div>
+												<div class="col-6">
+													<label for="textBgColor" class="form-label small">Background</label>
+													<div class="input-group">
+														<input type="color" class="form-control form-control-color" id="textBgColor" value="#ffffff" />
+														<div class="input-group-text">
+															<input class="form-check-input mt-0" type="checkbox" id="textBgTransparent" checked title="Transparent">
+														</div>
+													</div>
+												</div>
+											</div>
+											<div class="form-check mb-2">
+												<input class="form-check-input" type="checkbox" id="textOutline" />
+												<label class="form-check-label small" for="textOutline">
+													Add outline/border
+												</label>
+											</div>
+											<div class="form-check mb-2">
+												<input class="form-check-input" type="checkbox" id="textShadow" />
+												<label class="form-check-label small" for="textShadow">
+													Add shadow effect
+												</label>
+											</div>
+										</div>
+									</div>
+								</div>
+
 								<label for="inputText" class="form-label">Text to Print</label>
-								<textarea class="form-control" id="inputText" rows="3">Hello world</textarea>
+								<div class="input-group mb-1">
+									<textarea class="form-control" id="inputText" rows="3">Hello world</textarea>
+									<button type="button" class="btn btn-outline-secondary" id="btnEmojiPicker" title="Insert Emoji">
+										<i class="bi bi-emoji-smile"></i>
+									</button>
+								</div>
 								<small class="text-muted">Supports multi-line text. Use Enter for new lines.</small>
+								
+								<!-- Quick Emoji Bar -->
+								<div class="mt-2" id="quickEmojiBar">
+									<span class="emoji-btn" data-emoji="⚠️">⚠️</span>
+									<span class="emoji-btn" data-emoji="✓">✓</span>
+									<span class="emoji-btn" data-emoji="✗">✗</span>
+									<span class="emoji-btn" data-emoji="★">★</span>
+									<span class="emoji-btn" data-emoji="♥">♥</span>
+									<span class="emoji-btn" data-emoji="📦">📦</span>
+									<span class="emoji-btn" data-emoji="🔥">🔥</span>
+									<span class="emoji-btn" data-emoji="💰">💰</span>
+									<span class="emoji-btn" data-emoji="🎁">🎁</span>
+									<span class="emoji-btn" data-emoji="📍">📍</span>
+								</div>
 							</div>
 
 							<!-- Barcode Tab -->
@@ -352,6 +432,55 @@
 									<label for="inputImage" class="form-label">Select Image</label>
 									<input type="file" class="form-control" id="inputImage" accept="image/*" />
 								</div>
+								
+								<!-- Image Adjustments -->
+								<div class="card mb-2">
+									<div class="card-header py-2" data-bs-toggle="collapse" data-bs-target="#imageAdjustCollapse" style="cursor: pointer">
+										<small><i class="bi bi-sliders"></i> Image Adjustments <i class="bi bi-chevron-down float-end"></i></small>
+									</div>
+									<div class="collapse show" id="imageAdjustCollapse">
+										<div class="card-body py-2">
+											<div class="row mb-2">
+												<div class="col-6">
+													<label for="imageBrightness" class="form-label small">Brightness</label>
+													<input type="range" class="form-range" id="imageBrightness" min="-100" max="100" value="0" />
+													<small class="text-muted"><span id="brightnessValue">0</span></small>
+												</div>
+												<div class="col-6">
+													<label for="imageContrast" class="form-label small">Contrast</label>
+													<input type="range" class="form-range" id="imageContrast" min="-100" max="100" value="0" />
+													<small class="text-muted"><span id="contrastValue">0</span></small>
+												</div>
+											</div>
+											<div class="mb-2">
+												<label class="form-label small">Rotation</label>
+												<div class="btn-group btn-group-sm w-100" role="group">
+													<button type="button" class="btn btn-outline-secondary" id="btnRotateLeft" title="Rotate Left">
+														<i class="bi bi-arrow-counterclockwise"></i> -90°
+													</button>
+													<button type="button" class="btn btn-outline-secondary" id="btnRotate180" title="Rotate 180°">
+														<i class="bi bi-arrow-repeat"></i> 180°
+													</button>
+													<button type="button" class="btn btn-outline-secondary" id="btnRotateRight" title="Rotate Right">
+														<i class="bi bi-arrow-clockwise"></i> +90°
+													</button>
+												</div>
+											</div>
+											<div class="btn-group btn-group-sm w-100" role="group">
+												<button type="button" class="btn btn-outline-secondary" id="btnFlipH" title="Flip Horizontal">
+													<i class="bi bi-symmetry-vertical"></i> Flip H
+												</button>
+												<button type="button" class="btn btn-outline-secondary" id="btnFlipV" title="Flip Vertical">
+													<i class="bi bi-symmetry-horizontal"></i> Flip V
+												</button>
+												<button type="button" class="btn btn-outline-secondary" id="btnResetImage" title="Reset">
+													<i class="bi bi-arrow-counterclockwise"></i> Reset
+												</button>
+											</div>
+										</div>
+									</div>
+								</div>
+
 								<div class="row mb-2">
 									<div class="col-6">
 										<label for="ditheringAlgorithm" class="form-label">Dithering Algorithm</label>
@@ -562,26 +691,45 @@
 						<div class="card mb-3">
 							<div class="card-header d-flex justify-content-between align-items-center">
 								<span><i class="bi bi-eye"></i> Preview</span>
-								<small class="text-muted">Image is rotated 90° for printing</small>
+								<div>
+									<button type="button" class="btn btn-sm btn-outline-secondary me-1" id="btnZoomIn" title="Zoom In">
+										<i class="bi bi-zoom-in"></i>
+									</button>
+									<button type="button" class="btn btn-sm btn-outline-secondary me-1" id="btnZoomOut" title="Zoom Out">
+										<i class="bi bi-zoom-out"></i>
+									</button>
+									<small class="text-muted ms-2">Rotated 90° for printing</small>
+								</div>
 							</div>
-							<div class="card-body text-center">
-								<div class="canvas-wrapper d-inline-block">
+							<div class="card-body text-center" style="overflow: auto; max-height: 400px;">
+								<div class="canvas-wrapper d-inline-block" id="canvasContainer">
 									<canvas id="canvas"></canvas>
 								</div>
 							</div>
 						</div>
 
 						<!-- Print Controls -->
-						<div class="d-flex gap-2 flex-wrap">
+						<div class="d-flex gap-2 flex-wrap mb-2">
 							<button type="submit" class="btn btn-primary btn-lg" id="btnPrint">
 								<i class="bi bi-printer"></i> Print Label
 							</button>
+							<button type="button" class="btn btn-outline-success" id="btnBatchPrint" title="Print multiple different labels">
+								<i class="bi bi-list-check"></i> Batch Print
+							</button>
 							<button type="button" class="btn btn-outline-secondary" id="btnDownload">
-								<i class="bi bi-download"></i> Download Image
+								<i class="bi bi-download"></i> Download
 							</button>
 							<button type="button" class="btn btn-outline-info" id="btnPreviewDithering">
-								<i class="bi bi-palette"></i> Preview Dithering
+								<i class="bi bi-palette"></i> Dithering
 							</button>
+						</div>
+						
+						<!-- Quick Print Options -->
+						<div class="btn-group btn-group-sm mb-3" role="group">
+							<button type="button" class="btn btn-outline-secondary" id="btnPrint1x" title="Print 1 copy">×1</button>
+							<button type="button" class="btn btn-outline-secondary" id="btnPrint3x" title="Print 3 copies">×3</button>
+							<button type="button" class="btn btn-outline-secondary" id="btnPrint5x" title="Print 5 copies">×5</button>
+							<button type="button" class="btn btn-outline-secondary" id="btnPrint10x" title="Print 10 copies">×10</button>
 						</div>
 
 						<!-- Progress Bar -->
@@ -721,6 +869,73 @@
 						<button type="button" class="btn btn-primary" id="btnConfirmSaveTemplate">
 							<i class="bi bi-save"></i> Save
 						</button>
+					</div>
+				</div>
+			</div>
+		</div>
+
+		<!-- Batch Print Modal -->
+		<div class="modal fade" id="batchPrintModal" tabindex="-1">
+			<div class="modal-dialog modal-lg">
+				<div class="modal-content">
+					<div class="modal-header">
+						<h5 class="modal-title"><i class="bi bi-list-check"></i> Batch Print</h5>
+						<button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+					</div>
+					<div class="modal-body">
+						<p class="text-muted small">Add multiple text labels to print in sequence. Great for printing different names, prices, or serial numbers.</p>
+						
+						<div class="mb-3">
+							<label class="form-label">Batch Text Items (one per line)</label>
+							<textarea class="form-control" id="batchTextInput" rows="6" placeholder="Item 1&#10;Item 2&#10;Item 3&#10;..."></textarea>
+							<small class="text-muted">Enter each label text on a separate line</small>
+						</div>
+						
+						<div class="row mb-3">
+							<div class="col-md-4">
+								<label for="batchCopiesEach" class="form-label">Copies per Item</label>
+								<input type="number" class="form-control" id="batchCopiesEach" value="1" min="1" max="100" />
+							</div>
+							<div class="col-md-4">
+								<label for="batchDelay" class="form-label">Delay (ms)</label>
+								<input type="number" class="form-control" id="batchDelay" value="500" min="100" max="5000" step="100" />
+							</div>
+							<div class="col-md-4">
+								<label class="form-label">Total Labels</label>
+								<div class="form-control-plaintext fw-bold" id="batchTotalCount">0</div>
+							</div>
+						</div>
+						
+						<div class="progress mb-3" style="display: none" id="batchProgress">
+							<div class="progress-bar progress-bar-striped progress-bar-animated" role="progressbar" style="width: 0%" id="batchProgressBar"></div>
+						</div>
+						
+						<div class="alert alert-info small" id="batchStatus" style="display: none">
+							<i class="bi bi-info-circle"></i> <span id="batchStatusText">Ready to print</span>
+						</div>
+					</div>
+					<div class="modal-footer">
+						<button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+						<button type="button" class="btn btn-success" id="btnStartBatchPrint">
+							<i class="bi bi-printer"></i> Start Batch Print
+						</button>
+					</div>
+				</div>
+			</div>
+		</div>
+
+		<!-- Emoji Picker Modal -->
+		<div class="modal fade" id="emojiPickerModal" tabindex="-1">
+			<div class="modal-dialog modal-sm">
+				<div class="modal-content">
+					<div class="modal-header py-2">
+						<h6 class="modal-title"><i class="bi bi-emoji-smile"></i> Emoji Picker</h6>
+						<button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+					</div>
+					<div class="modal-body">
+						<div class="emoji-grid" id="emojiGrid">
+							<!-- Emoji grid populated by JS -->
+						</div>
 					</div>
 				</div>
 			</div>

@@ -325,6 +325,98 @@ kbd {
 	white-space: nowrap;
 }
 
+/* Quick Emoji Bar */
+#quickEmojiBar {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 0.25rem;
+}
+
+.emoji-btn {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 32px;
+	height: 32px;
+	font-size: 1.25rem;
+	cursor: pointer;
+	border-radius: 4px;
+	transition: background-color 0.15s;
+}
+
+.emoji-btn:hover {
+	background-color: #e9ecef;
+}
+
+/* Emoji Grid in Modal */
+.emoji-grid {
+	display: grid;
+	grid-template-columns: repeat(8, 1fr);
+	gap: 0.25rem;
+}
+
+.emoji-grid .emoji-btn {
+	width: 100%;
+	aspect-ratio: 1;
+}
+
+/* Quick Text Presets */
+.quick-text-preset {
+	margin-bottom: 0.25rem;
+}
+
+/* Canvas zoom controls */
+#canvasContainer {
+	transition: transform 0.2s ease;
+}
+
+#canvasContainer.zoomed-in {
+	transform: scale(1.5);
+	transform-origin: center center;
+}
+
+#canvasContainer.zoomed-out {
+	transform: scale(0.75);
+}
+
+/* Batch print styling */
+#batchTextInput {
+	font-family: monospace;
+	font-size: 0.9rem;
+}
+
+/* Quick print buttons */
+.btn-group .btn[id^="btnPrint"] {
+	min-width: 40px;
+}
+
+/* Collapsible card headers */
+.card-header[data-bs-toggle="collapse"] {
+	transition: background-color 0.15s;
+}
+
+.card-header[data-bs-toggle="collapse"]:hover {
+	background-color: rgba(0, 0, 0, 0.05);
+}
+
+.card-header[data-bs-toggle="collapse"] .bi-chevron-down {
+	transition: transform 0.2s;
+}
+
+.card-header[data-bs-toggle="collapse"].collapsed .bi-chevron-down {
+	transform: rotate(-90deg);
+}
+
+/* Text effects preview */
+.text-effect-preview {
+	font-size: 1.5rem;
+	padding: 0.5rem;
+	text-align: center;
+	border: 1px solid #dee2e6;
+	border-radius: 4px;
+	margin-top: 0.5rem;
+}
+
 /* Responsive tab text */
 @media (max-width: 576px) {
 	.nav-tabs .nav-link {
@@ -335,5 +427,16 @@ kbd {
 	.nav-tabs .nav-link i {
 		display: block;
 		margin-bottom: 0.25rem;
+	}
+}
+
+/* Dark mode emoji adjustments */
+@media (prefers-color-scheme: dark) {
+	.emoji-btn:hover {
+		background-color: #404040;
+	}
+	
+	#quickEmojiBar .emoji-btn {
+		filter: none;
 	}
 }
