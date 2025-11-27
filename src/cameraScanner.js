@@ -128,7 +128,7 @@ export class CameraScanner {
 	}
 
 	on(event, callback) {
-		if (this.callbacks.hasOwnProperty(event)) {
+		if (event in this.callbacks) {
 			this.callbacks[event] = callback;
 		}
 	}

@@ -16,7 +16,6 @@
 			"purpose": "any"
 		}
 	],
-	"screenshots": [],
 	"share_target": {
 		"action": "/",
 		"method": "GET",
@@ -36,24 +35,20 @@
 			"name": "Print Text Label",
 			"short_name": "Text",
 			"description": "Create a text label",
-			"url": "/#text",
-			"icons": []
+			"url": "/#text"
 		},
 		{
 			"name": "Print Barcode",
 			"short_name": "Barcode",
 			"description": "Create a barcode label",
-			"url": "/#barcode",
-			"icons": []
+			"url": "/#barcode"
 		},
 		{
 			"name": "Print QR Code",
 			"short_name": "QR Code",
 			"description": "Create a QR code label",
-			"url": "/#qr",
-			"icons": []
+			"url": "/#qr"
 		}
 	],
-	"related_applications": [],
 	"prefer_related_applications": false
 }
