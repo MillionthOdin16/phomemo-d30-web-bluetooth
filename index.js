@@ -42,6 +42,7 @@ const state = {
 	notifyCharacteristic: null,
 	canvasEditor: null,
 	currentTab: "text",
+	zoomLevel: 1, // Canvas zoom level
 };
 
 // ================== Utility Functions ==================
@@ -1189,11 +1190,17 @@ document.addEventListener("DOMContentLoaded", function () {
 		e.addEventListener("change", () => updateCanvasImage(canvas))
 	);
 
-	// Image brightness/contrast
+	// Image brightness/contrast - use explicit mapping for value display elements
+	const imageAdjustmentMap = {
+		imageBrightness: "brightnessValue",
+		imageContrast: "contrastValue",
+	};
+
 	$all("#imageBrightness, #imageContrast").forEach((el) => {
 		if (el) {
 			el.addEventListener("input", (e) => {
-				const valueEl = $(`#${e.target.id.replace("image", "").toLowerCase()}Value`);
+				const valueElId = imageAdjustmentMap[e.target.id];
+				const valueEl = valueElId ? $(`#${valueElId}`) : null;
 				if (valueEl) valueEl.textContent = e.target.value;
 				updateCanvasImage(canvas);
 			});
@@ -1298,17 +1305,16 @@ document.addEventListener("DOMContentLoaded", function () {
 
 	// ================== Canvas Zoom ==================
 
-	let zoomLevel = 1;
 	const container = $("#canvasContainer");
 
 	$("#btnZoomIn")?.addEventListener("click", () => {
-		zoomLevel = Math.min(zoomLevel + 0.25, 2);
-		container.style.transform = `scale(${zoomLevel})`;
+		state.zoomLevel = Math.min(state.zoomLevel + 0.25, 2);
+		container.style.transform = `scale(${state.zoomLevel})`;
 	});
 
 	$("#btnZoomOut")?.addEventListener("click", () => {
-		zoomLevel = Math.max(zoomLevel - 0.25, 0.5);
-		container.style.transform = `scale(${zoomLevel})`;
+		state.zoomLevel = Math.max(state.zoomLevel - 0.25, 0.5);
+		container.style.transform = `scale(${state.zoomLevel})`;
 	});
 
 	// ================== Drawing Tools ==================
