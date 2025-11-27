@@ -28,6 +28,9 @@ import {
 	saveDevice,
 	getSavedDevices,
 } from "./src/storage.js";
+import { voiceControl, voiceFeedback } from "./src/voiceControl.js";
+import { cameraScanner, ocrScanner } from "./src/cameraScanner.js";
+import { smartClipboard, CSVParser, printQueue } from "./src/smartFeatures.js";
 
 const $ = document.querySelector.bind(document);
 const $all = document.querySelectorAll.bind(document);
@@ -43,6 +46,9 @@ const state = {
 	canvasEditor: null,
 	currentTab: "text",
 	zoomLevel: 1, // Canvas zoom level
+	voiceActive: false,
+	csvData: null,
+	deferredInstallPrompt: null,
 };
 
 // ================== Utility Functions ==================
@@ -1456,6 +1462,553 @@ document.addEventListener("DOMContentLoaded", function () {
 	printerStatus.on(StatusEventType.PAPER, updateStatusDisplay);
 	printerStatus.on(StatusEventType.COVER, updateStatusDisplay);
 
+	// ================== Voice Control ==================
+
+	const updateVoiceUI = (listening) => {
+		const btn = $("#btnVoice");
+		const status = $("#voiceStatus");
+		
+		if (listening) {
+			btn.classList.add("listening");
+			btn.innerHTML = '<i class="bi bi-mic-fill"></i>';
+			status.style.display = "flex";
+		} else {
+			btn.classList.remove("listening");
+			btn.innerHTML = '<i class="bi bi-mic"></i>';
+			status.style.display = "none";
+			$("#voiceTranscript").textContent = "";
+		}
+		state.voiceActive = listening;
+	};
+
+	// Voice control callbacks
+	voiceControl.on("onStatusChange", updateVoiceUI);
+	
+	voiceControl.on("onResult", (transcript, isFinal) => {
+		$("#voiceTranscript").textContent = `"${transcript}"`;
+		if (!isFinal) {
+			$("#voiceStatusText").textContent = "Listening...";
+		}
+	});
+
+	voiceControl.on("onCommand", (action, transcript) => {
+		console.log("Voice command:", action, transcript);
+		$("#voiceStatusText").textContent = `Command: ${action}`;
+		
+		const feedbackEnabled = $("#voiceFeedbackEnabled")?.checked ?? true;
+		
+		switch (action) {
+			case "print":
+				print(canvas);
+				if (feedbackEnabled) voiceFeedback.speak("Printing label");
+				break;
+			case "print1":
+				$("#printCopies").value = 1;
+				print(canvas);
+				break;
+			case "print3":
+				$("#printCopies").value = 3;
+				print(canvas);
+				break;
+			case "print5":
+				$("#printCopies").value = 5;
+				print(canvas);
+				break;
+			case "print10":
+				$("#printCopies").value = 10;
+				print(canvas);
+				break;
+			case "tab:text":
+				document.querySelector("#nav-text-tab").click();
+				break;
+			case "tab:barcode":
+				document.querySelector("#nav-barcode-tab").click();
+				break;
+			case "tab:image":
+				document.querySelector("#nav-image-tab").click();
+				break;
+			case "tab:qr":
+				document.querySelector("#nav-qr-tab").click();
+				break;
+			case "tab:draw":
+				document.querySelector("#nav-draw-tab").click();
+				break;
+			case "tab:templates":
+				document.querySelector("#nav-templates-tab").click();
+				break;
+			case "connect":
+				connectPrinter();
+				break;
+			case "disconnect":
+				disconnectPrinter();
+				break;
+			case "clear":
+				$("#inputText").value = "";
+				updateCanvasText(canvas);
+				break;
+			case "undo":
+				state.canvasEditor?.undo();
+				break;
+			case "redo":
+				state.canvasEditor?.redo();
+				break;
+			case "saveTemplate":
+				$("#btnSaveTemplate").click();
+				break;
+			case "download":
+				downloadImage();
+				break;
+			case "fontBigger":
+				$("#inputFontSize").value = Math.min(parseInt($("#inputFontSize").value) + 8, 200);
+				updateCanvasText(canvas);
+				break;
+			case "fontSmaller":
+				$("#inputFontSize").value = Math.max(parseInt($("#inputFontSize").value) - 8, 8);
+				updateCanvasText(canvas);
+				break;
+			case "preset:name":
+				applyTextPreset("name");
+				break;
+			case "preset:price":
+				applyTextPreset("price");
+				break;
+			case "preset:warning":
+				applyTextPreset("warning");
+				break;
+			case "preset:fragile":
+				applyTextPreset("fragile");
+				break;
+			case "setText":
+				$("#inputText").value = transcript;
+				updateCanvasText(canvas);
+				break;
+			case "appendText":
+				$("#inputText").value += ($("#inputText").value ? " " : "") + transcript;
+				updateCanvasText(canvas);
+				break;
+			case "stop":
+				voiceControl.stop();
+				break;
+		}
+		
+		// Restart listening for continuous mode
+		setTimeout(() => {
+			if (state.voiceActive && action !== "stop") {
+				voiceControl.start();
+			}
+		}, 500);
+	});
+
+	voiceControl.on("onError", (error) => {
+		console.error("Voice error:", error);
+		if (error !== "no-speech") {
+			handleError(`Voice: ${error}`);
+		}
+		updateVoiceUI(false);
+	});
+
+	// Voice button
+	$("#btnVoice")?.addEventListener("click", () => {
+		if (state.voiceActive) {
+			voiceControl.stop();
+		} else {
+			if (voiceControl.isSupported()) {
+				voiceControl.start();
+			} else {
+				// Show help modal if not supported
+				const modal = new bootstrap.Modal($("#voiceCommandsModal"));
+				modal.show();
+			}
+		}
+	});
+
+	// Long press to show commands
+	let voicePressTimer;
+	$("#btnVoice")?.addEventListener("mousedown", () => {
+		voicePressTimer = setTimeout(() => {
+			const modal = new bootstrap.Modal($("#voiceCommandsModal"));
+			modal.show();
+		}, 500);
+	});
+	$("#btnVoice")?.addEventListener("mouseup", () => clearTimeout(voicePressTimer));
+	$("#btnVoice")?.addEventListener("mouseleave", () => clearTimeout(voicePressTimer));
+
+	// Start voice from modal
+	$("#btnStartVoiceFromModal")?.addEventListener("click", () => {
+		bootstrap.Modal.getInstance($("#voiceCommandsModal"))?.hide();
+		setTimeout(() => voiceControl.start(), 300);
+	});
+
+	// ================== Camera Scanner ==================
+
+	$("#btnStartCamera")?.addEventListener("click", async () => {
+		const video = $("#cameraVideo");
+		const container = $("#cameraPreviewContainer");
+		
+		const success = await cameraScanner.startCamera(video);
+		if (success) {
+			container.style.display = "block";
+			$("#btnStartCamera").disabled = true;
+			$("#btnStopCamera").disabled = false;
+			$("#btnCapture").disabled = false;
+			$("#btnScanBarcode").disabled = false;
+			$("#btnScanOCR").disabled = false;
+		}
+	});
+
+	$("#btnStopCamera")?.addEventListener("click", () => {
+		cameraScanner.stopCamera();
+		$("#cameraPreviewContainer").style.display = "none";
+		$("#btnStartCamera").disabled = false;
+		$("#btnStopCamera").disabled = true;
+		$("#btnCapture").disabled = true;
+		$("#btnScanBarcode").disabled = true;
+		$("#btnScanOCR").disabled = true;
+	});
+
+	$("#btnCapture")?.addEventListener("click", () => {
+		const frame = cameraScanner.captureFrame();
+		if (frame) {
+			// Set as image input
+			fetch(frame)
+				.then(res => res.blob())
+				.then(blob => {
+					const file = new File([blob], "capture.png", { type: "image/png" });
+					const dt = new DataTransfer();
+					dt.items.add(file);
+					$("#inputImage").files = dt.files;
+					updateCanvasImage(canvas);
+					document.querySelector("#nav-image-tab").click();
+					showSuccess("Image captured!");
+				});
+		}
+	});
+
+	$("#btnScanBarcode")?.addEventListener("click", async () => {
+		const result = await cameraScanner.scanBarcode();
+		if (result) {
+			$("#scanResult").style.display = "block";
+			$("#scanResultText").textContent = `${result.format}: ${result.value}`;
+			
+			// Auto-fill barcode input
+			$("#inputBarcode").value = result.value;
+			document.querySelector("#nav-barcode-tab").click();
+			updateCanvasBarcode(canvas);
+			showSuccess(`Barcode scanned: ${result.value}`);
+		} else {
+			handleError("No barcode detected. Try adjusting the camera.");
+		}
+	});
+
+	$("#btnScanOCR")?.addEventListener("click", async () => {
+		try {
+			$("#scanResultText").textContent = "Scanning text...";
+			$("#scanResult").style.display = "block";
+			
+			const frame = cameraScanner.captureFrame();
+			if (!frame) throw new Error("Failed to capture frame");
+			
+			const result = await ocrScanner.recognize(frame);
+			
+			if (result.text) {
+				$("#scanResultText").textContent = result.text;
+				$("#inputText").value = result.text;
+				document.querySelector("#nav-text-tab").click();
+				updateCanvasText(canvas);
+				showSuccess("Text recognized!");
+			} else {
+				$("#scanResultText").textContent = "No text detected";
+			}
+		} catch (e) {
+			handleError(`OCR Error: ${e.message}`);
+		}
+	});
+
+	// ================== CSV Import ==================
+
+	$("#csvFileInput")?.addEventListener("change", (e) => {
+		const file = e.target.files[0];
+		if (!file) return;
+
+		const reader = new FileReader();
+		reader.onload = (event) => {
+			try {
+				const hasHeader = $("#csvHasHeader").checked;
+				state.csvData = CSVParser.parse(event.target.result, hasHeader);
+				
+				// Populate column selector
+				const select = $("#csvColumn");
+				select.innerHTML = "";
+				
+				if (hasHeader && state.csvData.headers.length > 0) {
+					state.csvData.headers.forEach((header, i) => {
+						const option = document.createElement("option");
+						option.value = i;
+						option.textContent = header;
+						select.appendChild(option);
+					});
+				} else {
+					state.csvData.rows[0]?.forEach((_, i) => {
+						const option = document.createElement("option");
+						option.value = i;
+						option.textContent = `Column ${i + 1}`;
+						select.appendChild(option);
+					});
+				}
+				
+				$("#csvColumnSelect").style.display = "block";
+				$("#btnImportCSV").disabled = false;
+				$("#btnPreviewCSV").disabled = false;
+				
+				showSuccess(`Loaded ${state.csvData.rows.length} rows`);
+			} catch (err) {
+				handleError("Failed to parse CSV: " + err.message);
+			}
+		};
+		reader.readAsText(file);
+	});
+
+	$("#btnPreviewCSV")?.addEventListener("click", () => {
+		if (!state.csvData) return;
+		
+		const colIndex = parseInt($("#csvColumn").value);
+		const preview = state.csvData.rows.slice(0, 5).map(row => row[colIndex] || "").filter(Boolean);
+		
+		const list = $("#csvPreviewList");
+		list.innerHTML = preview.map(item => `<li>${item}</li>`).join("");
+		if (state.csvData.rows.length > 5) {
+			list.innerHTML += `<li class="text-muted">...and ${state.csvData.rows.length - 5} more</li>`;
+		}
+		$("#csvPreview").style.display = "block";
+	});
+
+	$("#btnImportCSV")?.addEventListener("click", async () => {
+		if (!state.csvData) return;
+		
+		const colIndex = parseInt($("#csvColumn").value);
+		const items = state.csvData.rows.map(row => row[colIndex] || "").filter(Boolean);
+		
+		// Fill batch print modal
+		$("#batchTextInput").value = items.join("\n");
+		updateBatchCount();
+		
+		// Open batch print modal
+		const modal = new bootstrap.Modal($("#batchPrintModal"));
+		modal.show();
+		
+		showSuccess(`Imported ${items.length} items for batch printing`);
+	});
+
+	// ================== WiFi QR Generator ==================
+
+	$("#btnGenerateWifiQR")?.addEventListener("click", () => {
+		const ssid = $("#wifiSSID").value.trim();
+		const password = $("#wifiPassword").value;
+		const security = $("#wifiSecurity").value;
+		
+		if (!ssid) {
+			handleError("Please enter network name (SSID)");
+			return;
+		}
+		
+		const qrData = `WIFI:T:${security};S:${ssid};P:${password};;`;
+		$("#inputQR").value = qrData;
+		document.querySelector("#nav-qr-tab").click();
+		updateCanvasQR(canvas);
+		showSuccess("WiFi QR code generated!");
+	});
+
+	// ================== vCard Generator ==================
+
+	$("#btnGenerateVCard")?.addEventListener("click", () => {
+		const name = $("#vcardName").value.trim();
+		const phone = $("#vcardPhone").value.trim();
+		const email = $("#vcardEmail").value.trim();
+		const company = $("#vcardCompany").value.trim();
+		
+		if (!name && !phone && !email) {
+			handleError("Please enter at least one contact field");
+			return;
+		}
+		
+		const vcard = [
+			"BEGIN:VCARD",
+			"VERSION:3.0",
+			name ? `FN:${name}` : "",
+			phone ? `TEL:${phone}` : "",
+			email ? `EMAIL:${email}` : "",
+			company ? `ORG:${company}` : "",
+			"END:VCARD",
+		].filter(Boolean).join("\n");
+		
+		$("#inputQR").value = vcard;
+		document.querySelector("#nav-qr-tab").click();
+		updateCanvasQR(canvas);
+		showSuccess("Contact QR code generated!");
+	});
+
+	// ================== Print Queue ==================
+
+	const updateQueueUI = () => {
+		const status = printQueue.getStatus();
+		const queue = printQueue.getQueue();
+		
+		$("#queueCount").textContent = status.total;
+		$("#btnProcessQueue").disabled = status.total === 0;
+		$("#btnClearQueue").disabled = status.total === 0;
+		
+		const list = $("#printQueueList");
+		if (queue.length === 0) {
+			list.innerHTML = '<div class="text-muted text-center py-2 small">Queue is empty</div>';
+			return;
+		}
+		
+		list.innerHTML = queue.map((item, i) => `
+			<div class="queue-item ${item.status}" data-id="${item.id}">
+				<img src="${item.preview || ""}" class="queue-preview" alt="Preview" />
+				<div class="queue-info">
+					<div class="fw-semibold small">${item.text?.substring(0, 20) || "Label " + (i + 1)}${item.text?.length > 20 ? "..." : ""}</div>
+					<div class="text-muted small">${item.copies || 1} cop${(item.copies || 1) > 1 ? "ies" : "y"}</div>
+				</div>
+				<div class="queue-status">
+					${item.status === "pending" ? '<i class="bi bi-clock text-muted"></i>' : ""}
+					${item.status === "printing" ? '<div class="spinner-border spinner-border-sm text-primary"></div>' : ""}
+					${item.status === "completed" ? '<i class="bi bi-check-circle text-success"></i>' : ""}
+					${item.status === "failed" ? '<i class="bi bi-x-circle text-danger"></i>' : ""}
+				</div>
+			</div>
+		`).join("");
+	};
+
+	printQueue.on("onProgress", updateQueueUI);
+	printQueue.on("onComplete", () => {
+		showSuccess("Print queue completed!");
+		updateQueueUI();
+	});
+
+	$("#btnAddToQueue")?.addEventListener("click", () => {
+		const item = {
+			text: $("#inputText").value,
+			type: state.currentTab,
+			preview: canvas.toDataURL("image/png"),
+			copies: parseInt($("#printCopies").value) || 1,
+		};
+		printQueue.add(item);
+		updateQueueUI();
+		showSuccess("Added to print queue");
+	});
+
+	$("#btnProcessQueue")?.addEventListener("click", async () => {
+		const printItem = async (item) => {
+			// Restore item content
+			if (item.type === "text") {
+				$("#inputText").value = item.text;
+				updateCanvasText(canvas);
+			}
+			
+			await new Promise(resolve => setTimeout(resolve, 100));
+			
+			const char = state.characteristic || await connectPrinter();
+			if (!char) throw new Error("Not connected");
+			
+			const options = {
+				speed: parseInt($("#printSpeed").value) || 5,
+				density: parseInt($("#printDensity").value) || 9,
+				labelType: parseInt($("#labelType").value) || 0x0a,
+				copies: item.copies || 1,
+				spacing: parseInt($("#labelSpacing").value) || 0,
+			};
+			
+			await printCanvasAdvanced(char, canvas, state.printerModel, options);
+		};
+		
+		await printQueue.process(printItem, 500);
+	});
+
+	$("#btnClearQueue")?.addEventListener("click", () => {
+		if (confirm("Clear print queue?")) {
+			printQueue.clear();
+			updateQueueUI();
+		}
+	});
+
+	// ================== Smart Clipboard ==================
+
+	let lastClipboardSuggestion = null;
+
+	smartClipboard.on("onSuggestion", (suggestion) => {
+		if (suggestion.originalContent === lastClipboardSuggestion?.originalContent) return;
+		lastClipboardSuggestion = suggestion;
+		
+		const banner = $("#clipboardSuggestion");
+		const text = $("#clipboardSuggestionText");
+		
+		text.textContent = `${suggestion.suggestion}: "${suggestion.originalContent.substring(0, 30)}${suggestion.originalContent.length > 30 ? "..." : ""}"`;
+		banner.style.display = "block";
+		banner.classList.add("show");
+	});
+
+	$("#btnApplyClipboard")?.addEventListener("click", () => {
+		if (!lastClipboardSuggestion) return;
+		
+		const s = lastClipboardSuggestion;
+		
+		switch (s.type) {
+			case "text":
+				$("#inputText").value = s.text;
+				document.querySelector("#nav-text-tab").click();
+				updateCanvasText(canvas);
+				break;
+			case "barcode":
+				$("#inputBarcode").value = s.data;
+				if (s.barcodeFormat) $("#barcodeFormat").value = s.barcodeFormat;
+				document.querySelector("#nav-barcode-tab").click();
+				updateCanvasBarcode(canvas);
+				break;
+			case "qr":
+				$("#inputQR").value = s.data;
+				document.querySelector("#nav-qr-tab").click();
+				updateCanvasQR(canvas);
+				break;
+		}
+		
+		$("#clipboardSuggestion").style.display = "none";
+		showSuccess("Applied clipboard content");
+	});
+
+	// Start clipboard monitoring
+	smartClipboard.startMonitoring(2000);
+
+	// ================== PWA Install ==================
+
+	window.addEventListener("beforeinstallprompt", (e) => {
+		e.preventDefault();
+		state.deferredInstallPrompt = e;
+		$("#btnInstall").style.display = "inline-block";
+	});
+
+	$("#btnInstall")?.addEventListener("click", async () => {
+		if (!state.deferredInstallPrompt) return;
+		
+		state.deferredInstallPrompt.prompt();
+		const result = await state.deferredInstallPrompt.userChoice;
+		
+		if (result.outcome === "accepted") {
+			showSuccess("App installed!");
+		}
+		state.deferredInstallPrompt = null;
+		$("#btnInstall").style.display = "none";
+	});
+
+	// Register service worker
+	if ("serviceWorker" in navigator) {
+		navigator.serviceWorker.register("/sw.js").then((reg) => {
+			console.log("Service Worker registered:", reg.scope);
+		}).catch((err) => {
+			console.log("Service Worker registration failed:", err);
+		});
+	}
+
 	// ================== Initialize ==================
 
 	// Setup keyboard shortcuts
@@ -1463,6 +2016,9 @@ document.addEventListener("DOMContentLoaded", function () {
 
 	// Initialize emoji picker
 	initEmojiPicker();
+
+	// Initialize queue UI
+	updateQueueUI();
 
 	// Load saved settings
 	const settings = getSettings();

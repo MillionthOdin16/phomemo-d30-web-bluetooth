@@ -1,0 +1,59 @@
+{
+	"name": "Phomemo Web Bluetooth Label Printer",
+	"short_name": "Phomemo Print",
+	"description": "A comprehensive web interface for Phomemo Bluetooth label printers. Print text, barcodes, images, and QR codes directly from your browser.",
+	"start_url": "/",
+	"display": "standalone",
+	"background_color": "#1a1a1a",
+	"theme_color": "#0d6efd",
+	"orientation": "any",
+	"categories": ["utilities", "productivity"],
+	"icons": [
+		{
+			"src": "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect fill='%230d6efd' width='100' height='100' rx='20'/><text x='50' y='65' font-size='50' text-anchor='middle' fill='white'>🏷️</text></svg>",
+			"sizes": "any",
+			"type": "image/svg+xml",
+			"purpose": "any"
+		}
+	],
+	"screenshots": [],
+	"share_target": {
+		"action": "/",
+		"method": "GET",
+		"params": {
+			"text": "text",
+			"url": "url"
+		}
+	},
+	"protocol_handlers": [
+		{
+			"protocol": "web+label",
+			"url": "/?label=%s"
+		}
+	],
+	"shortcuts": [
+		{
+			"name": "Print Text Label",
+			"short_name": "Text",
+			"description": "Create a text label",
+			"url": "/#text",
+			"icons": []
+		},
+		{
+			"name": "Print Barcode",
+			"short_name": "Barcode",
+			"description": "Create a barcode label",
+			"url": "/#barcode",
+			"icons": []
+		},
+		{
+			"name": "Print QR Code",
+			"short_name": "QR Code",
+			"description": "Create a QR code label",
+			"url": "/#qr",
+			"icons": []
+		}
+	],
+	"related_applications": [],
+	"prefer_related_applications": false
+}
